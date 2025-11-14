@@ -2,18 +2,22 @@ use eframe::egui;
 use std::path::PathBuf;
 use dirs;
 
-pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) {
+pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
+    let mut needs_refresh = false;
+
     ui.horizontal(|ui| {
         // 导航按钮
         if ui.add(egui::Button::new("⬅️ 返回").small()).clicked() {
             if let Some(parent) = current_path.parent() {
                 *current_path = parent.to_path_buf();
+                needs_refresh = true;
             }
         }
 
         if ui.add(egui::Button::new("🏠 主页").small()).clicked() {
             if let Some(home_dir) = dirs::home_dir() {
                 *current_path = home_dir;
+                needs_refresh = true;
             }
         }
 
@@ -31,6 +35,7 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) {
             let new_path = PathBuf::from(&path_text);
             if new_path.exists() && new_path.is_dir() {
                 *current_path = new_path;
+                needs_refresh = true;
             }
         }
 
@@ -42,7 +47,7 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) {
         }
 
         if ui.add(egui::Button::new("🔄 刷新").small()).clicked() {
-            // TODO: 实现刷新
+            needs_refresh = true;
         }
 
         ui.add_space(10.0);
@@ -71,4 +76,6 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) {
             );
         });
     });
+
+    needs_refresh
 }

@@ -16,6 +16,7 @@ tests/
 Archive/
 BAT/
 target/
+note/
 
 # 忽略下载的安装文件
 *.exe

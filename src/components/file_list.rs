@@ -101,7 +101,9 @@ impl FileList {
         });
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> bool {
+        let mut should_navigate = false;
+
         // 表头
         ui.horizontal(|ui| {
             ui.label("名称");
@@ -133,7 +135,7 @@ impl FileList {
                         // 双击进入文件夹
                         *current_path = file.path.clone();
                         *selected_file = None;
-                        return true;
+                        should_navigate = true;
                     } else if name_response.clicked() {
                         if file.is_dir {
                             // 单击目录时高亮，不导航
@@ -165,5 +167,7 @@ impl FileList {
                 }
             }
         });
+
+        should_navigate
     }
 }

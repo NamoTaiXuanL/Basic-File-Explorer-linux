@@ -80,11 +80,15 @@ struct FileExplorerApp {
 impl FileExplorerApp {
     fn new() -> Self {
         let current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let mut file_list = FileList::new();
+
+        // 初始化时加载文件列表
+        file_list.refresh(current_path.clone(), false);
 
         Self {
             current_path: current_path.clone(),
             selected_file: None,
-            file_list: FileList::new(),
+            file_list,
             preview: Preview::new(),
             show_hidden: false,
         }
@@ -133,7 +137,10 @@ impl eframe::App for FileExplorerApp {
                 ui.separator();
 
                 // 工具栏
-                toolbar::show_toolbar(ui, &mut self.current_path);
+                let mut needs_refresh = toolbar::show_toolbar(ui, &mut self.current_path);
+                if needs_refresh {
+                    self.refresh_current_directory();
+                }
 
                 ui.separator();
 
@@ -148,7 +155,10 @@ impl eframe::App for FileExplorerApp {
                             ui.heading(format!("{}", self.current_path.display()));
                             ui.separator();
                             egui::ScrollArea::both().show(ui, |ui| {
-                                self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
+                                let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
+                                if should_navigate {
+                                    self.refresh_current_directory();
+                                }
                             });
                         }
                     );
