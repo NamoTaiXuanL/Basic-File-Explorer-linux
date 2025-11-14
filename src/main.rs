@@ -230,8 +230,9 @@ impl eframe::App for FileExplorerApp {
                     let left_rect = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top()), egui::pos2(rect.left() + left_w, rect.bottom()));
                     ui.painter().with_clip_rect(left_rect).text(egui::pos2(left_rect.left() + 6.0, left_rect.center().y), egui::Align2::LEFT_CENTER, "目录", font_id.clone(), color);
 
-                    // 中间：四个导航按钮
-                    let mid_rect = egui::Rect::from_min_max(egui::pos2(left_rect.right(), rect.top()), egui::pos2(left_rect.right() + mid_w, rect.bottom()));
+                    // 中间：四个导航按钮（与下方三栏的item_spacing保持一致）
+                    let mid_left = left_rect.right() + spacing;
+                    let mid_rect = egui::Rect::from_min_max(egui::pos2(mid_left, rect.top()), egui::pos2(mid_left + mid_w, rect.bottom()));
                     let mut x = mid_rect.left();
                     let make_rect = |x0: f32| egui::Rect::from_min_max(egui::pos2(x0, mid_rect.top()), egui::pos2(x0 + button_w, mid_rect.bottom()));
                     let r_back = make_rect(x);
@@ -256,8 +257,9 @@ impl eframe::App for FileExplorerApp {
                         }
                     }
 
-                    // 右侧：预览
-                    let right_rect = egui::Rect::from_min_max(egui::pos2(mid_rect.right(), rect.top()), egui::pos2(rect.right(), rect.bottom()));
+                    // 右侧：预览（考虑与中栏的间距对齐）
+                    let right_left = mid_rect.right() + spacing;
+                    let right_rect = egui::Rect::from_min_max(egui::pos2(right_left, rect.top()), egui::pos2(rect.right(), rect.bottom()));
                     ui.painter().with_clip_rect(right_rect).text(egui::pos2(right_rect.left() + 6.0, right_rect.center().y), egui::Align2::LEFT_CENTER, "预览", font_id, color);
                 }
 
