@@ -8,10 +8,6 @@ pub struct DirectoryTree {
     expanded_dirs: std::collections::HashSet<PathBuf>,
 }
 
-enum TreeOperation {
-    Navigate(PathBuf),
-    ToggleExpand(PathBuf),
-}
 
 #[derive(Clone)]
 struct TreeNode {
@@ -31,8 +27,8 @@ impl DirectoryTree {
 
     pub fn refresh(&mut self, root_path: &Path) {
         self.tree_nodes.clear();
-        // 限制初始深度为3，避免过深的递归
-        if let Some(node) = self.build_tree_node(root_path, 3) {
+        // 只加载第一层子目录，大幅减少IO操作
+        if let Some(node) = self.build_tree_node(root_path, 2) {
             self.tree_nodes.push(node);
         }
     }
@@ -50,15 +46,34 @@ impl DirectoryTree {
         let is_dir = path.is_dir();
         let mut children = Vec::new();
 
-        // 限制递归深度，避免无限循环
-        if is_dir {
+        // 大幅优化：只在第一层加载目录，子目录延迟加载
+        if is_dir && max_depth == 2 {
             if let Ok(entries) = fs::read_dir(path) {
+                let mut dir_count = 0;
+                const MAX_DIRS_PER_LEVEL: usize = 50; // 限制每个目录最多显示的子目录数
+
                 for entry in entries.flatten() {
+                    if dir_count >= MAX_DIRS_PER_LEVEL {
+                        break; // 限制目录数量，避免性能问题
+                    }
+
                     let entry_path = entry.path();
                     if entry_path.is_dir() {
-                        if let Some(child_node) = self.build_tree_node(&entry_path, max_depth - 1) {
-                            children.push(child_node);
-                        }
+                        // 只添加占位符节点，不递归加载
+                        let child_name = entry_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("未知")
+                            .to_string();
+
+                        children.push(TreeNode {
+                            path: entry_path,
+                            name: child_name,
+                            is_dir: true,
+                            children: Vec::new(), // 不预加载子目录
+                        });
+
+                        dir_count += 1;
                     }
                 }
             }
@@ -74,30 +89,12 @@ impl DirectoryTree {
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         let mut should_navigate = false;
-        let expanded_dirs = self.expanded_dirs.clone(); // 只克隆一次HashSet
+        let nodes = self.tree_nodes.clone(); // 简单克隆，避免借用问题
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // 收集所有的操作，避免递归中的状态修改
-            let mut operations = Vec::new();
-
-            for node in &self.tree_nodes {
-                self.collect_node_operations(ui, node, 0, current_path, &expanded_dirs, &mut operations);
-            }
-
-            // 处理收集到的操作
-            for operation in operations {
-                match operation {
-                    TreeOperation::Navigate(path) => {
-                        *current_path = path;
-                        should_navigate = true;
-                    }
-                    TreeOperation::ToggleExpand(path) => {
-                        if self.expanded_dirs.contains(&path) {
-                            self.expanded_dirs.remove(&path);
-                        } else {
-                            self.expanded_dirs.insert(path);
-                        }
-                    }
+            for node in &nodes {
+                if self.show_node_simple(ui, node, 0, current_path, &mut should_navigate) {
+                    should_navigate = true;
                 }
             }
         });
@@ -105,46 +102,25 @@ impl DirectoryTree {
         should_navigate
     }
 
-    fn collect_node_operations(
-        &self,
+    fn show_node_simple(
+        &mut self,
         ui: &mut egui::Ui,
         node: &TreeNode,
         depth: usize,
-        current_path: &PathBuf,
-        expanded_dirs: &std::collections::HashSet<PathBuf>,
-        operations: &mut Vec<TreeOperation>,
-    ) {
-        // 显示当前节点并收集操作
-        if let Some(operation) = self.show_node_with_ops(ui, node, depth, current_path, expanded_dirs) {
-            operations.push(operation);
-        }
+        current_path: &mut PathBuf,
+        should_navigate: &mut bool,
+    ) -> bool {
+        let is_selected = current_path == &node.path;
+        let is_expanded = self.expanded_dirs.contains(&node.path);
 
-        // 显示子节点
-        if node.is_dir && expanded_dirs.contains(&node.path) {
-            for child in &node.children {
-                self.collect_node_operations(ui, child, depth + 1, current_path, expanded_dirs, operations);
-            }
-        }
-    }
-
-    fn show_node_with_ops(
-        &self,
-        ui: &mut egui::Ui,
-        node: &TreeNode,
-        depth: usize,
-        current_path: &PathBuf,
-        expanded_dirs: &std::collections::HashSet<PathBuf>,
-    ) -> Option<TreeOperation> {
-        let is_current = current_path == &node.path;
-
-        // 整行按钮，使用与内容框相同的点击逻辑
+        // 完全模仿内容框的按钮逻辑
         let button_response = ui.add_sized(
             [ui.available_width(), ui.spacing().interact_size.y * 1.5],
             egui::Button::new({
                 let indent = "  ".repeat(depth);
 
                 let icon = if node.is_dir {
-                    if expanded_dirs.contains(&node.path) {
+                    if is_expanded {
                         "📂"
                     } else {
                         "📁"
@@ -155,29 +131,46 @@ impl DirectoryTree {
 
                 format!("{}{} {}", indent, icon, node.name)
             })
-            .fill(if is_current {
-                ui.visuals().widgets.inactive.bg_fill
-            } else {
-                egui::Color32::TRANSPARENT
-            })
-            .stroke(if is_current {
+            .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
+            .stroke(if is_selected {
                 egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
             } else {
                 egui::Stroke::NONE
             })
         );
 
-        // 处理点击事件
+        // 完全模仿内容框的点击处理
         if button_response.clicked() && node.is_dir {
-            return Some(TreeOperation::Navigate(node.path.clone()));
+            *current_path = node.path.clone();
+            *should_navigate = true;
         }
 
-        // 处理双击展开/折叠
+        // 双击展开/折叠
         if button_response.double_clicked() && node.is_dir {
-            return Some(TreeOperation::ToggleExpand(node.path.clone()));
+            if is_expanded {
+                self.expanded_dirs.remove(&node.path);
+            } else {
+                self.expanded_dirs.insert(node.path.clone());
+            }
         }
 
-        None
+        // 显示子节点
+        if node.is_dir && is_expanded {
+            for child in &node.children {
+                if self.show_node_simple(ui, child, depth + 1, current_path, should_navigate) {
+                    *should_navigate = true;
+                }
+            }
+        }
+
+        *should_navigate
+    }
+
+    
+    
+    pub fn ensure_path_loaded(&mut self, path: &Path) {
+        // 只展开路径，不重新构建整个目录树
+        self.expand_to_path(path);
     }
 
     pub fn expand_to_path(&mut self, path: &Path) {

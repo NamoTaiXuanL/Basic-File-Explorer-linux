@@ -112,13 +112,10 @@ impl FileExplorerApp {
 
     fn refresh_current_directory(&mut self) {
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
-        // 刷新目录树到当前路径的父目录
-        if let Some(parent) = self.current_path.parent() {
-            self.directory_tree.refresh(parent);
-        } else {
-            self.directory_tree.refresh(&self.current_path);
-        }
-        self.directory_tree.expand_to_path(&self.current_path);
+
+        // 优化目录树刷新：只在需要时刷新，避免重复构建
+        // 不每次都重新构建整个目录树，只确保当前路径已展开
+        self.directory_tree.ensure_path_loaded(&self.current_path);
     }
 
     fn select_file(&mut self, file: PathBuf) {
