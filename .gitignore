@@ -17,6 +17,7 @@ Archive/
 BAT/
 target/
 note/
+AGENTS/
 
 # 忽略下载的安装文件
 *.exe
@@ -36,6 +37,9 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+
+CLAUDE.md
 
 # 忽略虚拟环境
 venv/

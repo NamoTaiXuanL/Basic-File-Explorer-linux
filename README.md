@@ -19,7 +19,6 @@ src/
 ├── utils.rs             # 工具函数
 └── components/
     ├── mod.rs           # 模块定义
-    ├── directory_tree.rs # 目录树组件
     ├── file_list.rs     # 文件列表组件
     ├── preview.rs       # 预览组件
     ├── menu_bar.rs      # 菜单栏组件
