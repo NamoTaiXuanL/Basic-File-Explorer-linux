@@ -71,6 +71,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 
 struct FileExplorerApp {
     current_path: PathBuf,
+    directory_current_path: PathBuf,  // 目录框的当前路径
     selected_file: Option<PathBuf>,
     file_list: FileList,
     directory_list: FileList,  // 使用FileList代替DirectoryTree
@@ -81,18 +82,17 @@ struct FileExplorerApp {
 impl FileExplorerApp {
     fn new() -> Self {
         let current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let directory_current_path = current_path.parent().unwrap_or(&current_path).to_path_buf();
         let mut file_list = FileList::new();
         let mut directory_list = FileList::new();
 
         // 初始化文件列表
         file_list.refresh(current_path.clone(), false);
-
-        // 目录列表使用父目录
-        let parent_path = current_path.parent().unwrap_or(&current_path);
-        directory_list.refresh(parent_path.to_path_buf(), false);
+        directory_list.refresh(directory_current_path.clone(), false);
 
         Self {
             current_path: current_path.clone(),
+            directory_current_path,
             selected_file: None,
             file_list,
             directory_list,
@@ -110,12 +110,29 @@ impl FileExplorerApp {
         }
     }
 
-    fn refresh_current_directory(&mut self) {
+    fn refresh_file_list(&mut self) {
+        // 只刷新内容框
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
+    }
 
-        // 目录列表显示父目录
-        let parent_path = self.current_path.parent().unwrap_or(&self.current_path);
-        self.directory_list.refresh(parent_path.to_path_buf(), self.show_hidden);
+    fn refresh_directory_list(&mut self) {
+        // 只刷新目录框
+        self.directory_list.refresh(self.directory_current_path.clone(), self.show_hidden);
+    }
+
+    fn navigate_directory_to(&mut self, path: PathBuf) {
+        // 目录框导航，不刷新内容框
+        if path.is_dir() {
+            self.directory_current_path = path.clone();
+            self.refresh_directory_list();
+        }
+    }
+
+    fn go_up_directory(&mut self) {
+        // 返回上级目录
+        if let Some(parent) = self.directory_current_path.parent() {
+            self.navigate_directory_to(parent.to_path_buf());
+        }
     }
 
     fn select_file(&mut self, file: PathBuf) {
@@ -150,7 +167,8 @@ impl eframe::App for FileExplorerApp {
                 // 工具栏
                 let mut needs_refresh = toolbar::show_toolbar(ui, &mut self.current_path);
                 if needs_refresh {
-                    self.refresh_current_directory();
+                    self.refresh_file_list();
+                    self.refresh_directory_list();
                 }
 
                 ui.separator();
@@ -165,10 +183,27 @@ impl eframe::App for FileExplorerApp {
                         |ui| {
                             ui.heading("目录");
                             ui.separator();
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                let should_navigate = self.directory_list.show(ui, &mut self.current_path, &mut self.selected_file);
+
+                            // 返回上级目录按钮
+                            if ui.add_sized(
+                                [ui.available_width(), ui.spacing().interact_size.y * 1.5],
+                                egui::Button::new("⬆ 返回上级目录")
+                            ).clicked() {
+                                self.go_up_directory();
+                            }
+
+                            ui.separator();
+
+                            // 独立的滚动区域
+                            let mut temp_current_path = self.directory_current_path.clone();
+                            egui::ScrollArea::vertical().id_salt("directory_scroll").show(ui, |ui| {
+                                let should_navigate = self.directory_list.show(ui, &mut temp_current_path, &mut self.selected_file);
                                 if should_navigate {
-                                    self.refresh_current_directory();
+                                    // 目录框点击目录时：更新内容框到该目录
+                                    self.current_path = temp_current_path.clone();
+                                    self.refresh_file_list();
+
+                                    // 目录框保持当前显示，不改变
                                 }
                             });
                         }
@@ -181,10 +216,18 @@ impl eframe::App for FileExplorerApp {
                         |ui| {
                             ui.heading(format!("内容: {}", self.current_path.display()));
                             ui.separator();
-                            egui::ScrollArea::both().show(ui, |ui| {
+
+                            // 独立的滚动区域
+                            egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
                                 let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
                                 if should_navigate {
-                                    self.refresh_current_directory();
+                                    // 内容框导航时，更新当前路径并刷新两个列表
+                                    self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();
+                                    self.refresh_file_list();
+
+                                    // 同时更新目录框显示父目录
+                                    self.directory_current_path = self.current_path.parent().unwrap_or(&self.current_path).to_path_buf();
+                                    self.refresh_directory_list();
                                 }
                             });
                         }
