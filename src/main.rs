@@ -167,8 +167,8 @@ impl eframe::App for FileExplorerApp {
                 // 工具栏
                 let mut needs_refresh = toolbar::show_toolbar(ui, &mut self.current_path);
                 if needs_refresh {
+                    // 工具栏只影响内容框，不影响目录框
                     self.refresh_file_list();
-                    self.refresh_directory_list();
                 }
 
                 ui.separator();
@@ -197,13 +197,21 @@ impl eframe::App for FileExplorerApp {
                             // 独立的滚动区域
                             let mut temp_current_path = self.directory_current_path.clone();
                             egui::ScrollArea::vertical().id_salt("directory_scroll").show(ui, |ui| {
-                                let should_navigate = self.directory_list.show(ui, &mut temp_current_path, &mut self.selected_file);
-                                if should_navigate {
-                                    // 目录框点击目录时：更新内容框到该目录
-                                    self.current_path = temp_current_path.clone();
-                                    self.refresh_file_list();
+                                let (should_refresh_content, should_navigate_directory) =
+                                    self.directory_list.show_for_directory(ui, &mut temp_current_path, &mut self.selected_file);
 
-                                    // 目录框保持当前显示，不改变
+                                if should_refresh_content {
+                                    // 单击目录：内容框刷新到该目录
+                                    if let Some(selected_path) = &self.selected_file {
+                                        self.current_path = selected_path.clone();
+                                        self.refresh_file_list();
+                                    }
+                                }
+
+                                if should_navigate_directory {
+                                    // 双击目录：目录框进入该目录
+                                    self.directory_current_path = temp_current_path.clone();
+                                    self.refresh_directory_list();
                                 }
                             });
                         }
@@ -221,13 +229,11 @@ impl eframe::App for FileExplorerApp {
                             egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
                                 let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
                                 if should_navigate {
-                                    // 内容框导航时，更新当前路径并刷新两个列表
+                                    // 内容框点击文件夹时：只更新内容框，不刷新目录框
                                     self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();
                                     self.refresh_file_list();
 
-                                    // 同时更新目录框显示父目录
-                                    self.directory_current_path = self.current_path.parent().unwrap_or(&self.current_path).to_path_buf();
-                                    self.refresh_directory_list();
+                                    // 目录框保持不变，不自动更新
                                 }
                             });
                         }
