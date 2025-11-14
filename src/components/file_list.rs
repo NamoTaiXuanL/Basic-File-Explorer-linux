@@ -109,46 +109,49 @@ impl FileList {
             for file in &self.files {
                 let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
 
-                // 整行按钮，增大点击区域 - 使用布局容器实现文字左对齐
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                    let button_response = ui.add_sized(
-                        [ui.available_width(), ui.spacing().interact_size.y * 1.5],
-                        egui::Button::new(
-                            egui::RichText::new({
-                                let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                let row_size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y * 1.5);
+                let (rect, response) = ui.allocate_exact_size(row_size, egui::Sense::click());
 
-                                // 添加文件大小信息
-                                if !file.is_dir {
-                                    text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
-                                } else {
-                                    text.push_str(" —");
-                                }
+                if is_selected {
+                    let visuals = ui.visuals();
+                    ui.painter().rect_filled(rect, 0.0, visuals.widgets.inactive.bg_fill);
+                    ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, visuals.widgets.active.fg_stroke.color));
+                }
 
-                                // 添加修改时间
-                                text.push_str(&format!(" {}", file.modified));
-
-                                text
-                            })
-                        )
-                        .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
-                        .stroke(if is_selected {
-                            egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
+                {
+                    let text = {
+                        let mut t = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                        if !file.is_dir {
+                            t.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
                         } else {
-                            egui::Stroke::NONE
-                        })
+                            t.push_str(" —");
+                        }
+                        t.push_str(&format!(" {}", file.modified));
+                        t
+                    };
+                    let font_id = ui.style().text_styles.get(&egui::TextStyle::Body).cloned().unwrap_or_else(|| egui::FontId::default());
+                    let color = ui.visuals().text_color();
+                    ui.painter().text(
+                        rect.left_center() + egui::vec2(6.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        text,
+                        font_id,
+                        color,
                     );
+                }
 
-                    // 处理点击事件
-                    if button_response.double_clicked() && file.is_dir {
-                        // 双击进入文件夹
-                        *current_path = file.path.clone();
-                        *selected_file = None;
-                        should_navigate = true;
-                    } else if button_response.clicked() {
-                        // 单击选择文件或文件夹
-                        *selected_file = Some(file.path.clone());
-                    }
-                });
+                let button_response = response;
+
+                // 处理点击事件
+                if button_response.double_clicked() && file.is_dir {
+                    // 双击进入文件夹
+                    *current_path = file.path.clone();
+                    *selected_file = None;
+                    should_navigate = true;
+                } else if button_response.clicked() {
+                    // 单击选择文件或文件夹
+                    *selected_file = Some(file.path.clone());
+                }
             }
         });
 
@@ -164,50 +167,53 @@ impl FileList {
         for file in &self.files {
             let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
 
-            // 整行按钮，增大点击区域 - 使用布局容器实现文字左对齐
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                let button_response = ui.add_sized(
-                    [ui.available_width(), ui.spacing().interact_size.y * 1.5],
-                    egui::Button::new(
-                        egui::RichText::new({
-                            let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+            let row_size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y * 1.5);
+            let (rect, response) = ui.allocate_exact_size(row_size, egui::Sense::click());
 
-                            // 添加文件大小信息
-                            if !file.is_dir {
-                                text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
-                            } else {
-                                text.push_str(" —");
-                            }
+            if is_selected {
+                let visuals = ui.visuals();
+                ui.painter().rect_filled(rect, 0.0, visuals.widgets.inactive.bg_fill);
+                ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, visuals.widgets.active.fg_stroke.color));
+            }
 
-                            // 添加修改时间
-                            text.push_str(&format!(" {}", file.modified));
-
-                            text
-                        })
-                    )
-                    .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
-                    .stroke(if is_selected {
-                        egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
+            {
+                let text = {
+                    let mut t = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                    if !file.is_dir {
+                        t.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
                     } else {
-                        egui::Stroke::NONE
-                    })
+                        t.push_str(" —");
+                    }
+                    t.push_str(&format!(" {}", file.modified));
+                    t
+                };
+                let font_id = ui.style().text_styles.get(&egui::TextStyle::Body).cloned().unwrap_or_else(|| egui::FontId::default());
+                let color = ui.visuals().text_color();
+                ui.painter().text(
+                    rect.left_center() + egui::vec2(6.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    text,
+                    font_id,
+                    color,
                 );
+            }
 
-                // 处理点击事件 - 目录框特殊逻辑
-                if button_response.double_clicked() && file.is_dir {
-                    // 双击目录：目录框进入该目录
-                    *current_path = file.path.clone();
-                    *selected_file = None;
-                    should_navigate_directory = true;
-                } else if button_response.clicked() && file.is_dir {
-                    // 单击目录：内容框刷新到该目录
-                    *selected_file = Some(file.path.clone());
-                    should_refresh_content = true;
-                } else if button_response.clicked() {
-                    // 单击文件：仅选择
-                    *selected_file = Some(file.path.clone());
-                }
-            });
+            let button_response = response;
+
+            // 处理点击事件 - 目录框特殊逻辑
+            if button_response.double_clicked() && file.is_dir {
+                // 双击目录：目录框进入该目录
+                *current_path = file.path.clone();
+                *selected_file = None;
+                should_navigate_directory = true;
+            } else if button_response.clicked() && file.is_dir {
+                // 单击目录：内容框刷新到该目录
+                *selected_file = Some(file.path.clone());
+                should_refresh_content = true;
+            } else if button_response.clicked() {
+                // 单击文件：仅选择
+                *selected_file = Some(file.path.clone());
+            }
         }
 
         (should_refresh_content, should_navigate_directory)
