@@ -79,6 +79,8 @@ struct FileExplorerApp {
     show_hidden: bool,
     nav_history: Vec<PathBuf>,
     history_pos: usize,
+    left_ratio: f32,
+    mid_ratio: f32,
 }
 
 impl FileExplorerApp {
@@ -102,6 +104,8 @@ impl FileExplorerApp {
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
+            left_ratio: 0.25,
+            mid_ratio: 0.45,
         }
     }
 
@@ -211,8 +215,8 @@ impl eframe::App for FileExplorerApp {
                     let total_w = ui.available_width();
                     let row_h = ui.spacing().interact_size.y * 1.1;
                     let (rect, _resp) = ui.allocate_exact_size([total_w, row_h].into(), egui::Sense::hover());
-                    let left_w = total_w * 0.25;
-                    let mid_w = total_w * 0.45;
+                    let left_w = total_w * self.left_ratio;
+                    let mid_w = total_w * self.mid_ratio;
                     let right_w = total_w - left_w - mid_w;
 
                     let spacing = ui.spacing().item_spacing.x;
@@ -263,9 +267,13 @@ impl eframe::App for FileExplorerApp {
                 // 主内容区域 - 使用剩余的全部高度
                 let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
+                    let total_w = ui.available_width();
+                    let left_w = total_w * self.left_ratio;
+                    let mid_w = total_w * self.mid_ratio;
+                    let right_w = total_w - left_w - mid_w;
                     // 左侧目录列表 (25%宽度) - 使用FileList
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.25, available_height].into(),
+                        [left_w, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             // 左侧标题由贯穿式标题栏提供
@@ -306,7 +314,7 @@ impl eframe::App for FileExplorerApp {
 
                     // 中间文件列表 (45%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.45, available_height].into(),
+                        [mid_w, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             // 中间标题由贯穿式标题栏提供
@@ -339,7 +347,7 @@ impl eframe::App for FileExplorerApp {
 
                     // 右侧预览面板 (30%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width(), available_height].into(),
+                        [right_w, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             // 右侧标题由贯穿式标题栏提供
