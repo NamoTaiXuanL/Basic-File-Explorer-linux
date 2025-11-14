@@ -109,7 +109,63 @@ impl FileList {
             for file in &self.files {
                 let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
 
-                // 整行按钮，增大点击区域
+                // 整行按钮，增大点击区域 - 使用布局容器实现文字左对齐
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    let button_response = ui.add_sized(
+                        [ui.available_width(), ui.spacing().interact_size.y * 1.5],
+                        egui::Button::new(
+                            egui::RichText::new({
+                                let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+
+                                // 添加文件大小信息
+                                if !file.is_dir {
+                                    text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
+                                } else {
+                                    text.push_str(" —");
+                                }
+
+                                // 添加修改时间
+                                text.push_str(&format!(" {}", file.modified));
+
+                                text
+                            })
+                        )
+                        .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
+                        .stroke(if is_selected {
+                            egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
+                        } else {
+                            egui::Stroke::NONE
+                        })
+                    );
+
+                    // 处理点击事件
+                    if button_response.double_clicked() && file.is_dir {
+                        // 双击进入文件夹
+                        *current_path = file.path.clone();
+                        *selected_file = None;
+                        should_navigate = true;
+                    } else if button_response.clicked() {
+                        // 单击选择文件或文件夹
+                        *selected_file = Some(file.path.clone());
+                    }
+                });
+            }
+        });
+
+        should_navigate
+    }
+
+    // 专门用于目录框的方法：支持单双击分离逻辑（不包含ScrollArea）
+    pub fn show_for_directory(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> (bool, bool) {
+        let mut should_refresh_content = false;  // 单击目录时刷新内容框
+        let mut should_navigate_directory = false;  // 双击目录时目录框导航
+
+        // 文件列表 - 不包含ScrollArea，由调用者提供
+        for file in &self.files {
+            let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
+
+            // 整行按钮，增大点击区域 - 使用布局容器实现文字左对齐
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 let button_response = ui.add_sized(
                     [ui.available_width(), ui.spacing().interact_size.y * 1.5],
                     egui::Button::new(
@@ -137,73 +193,21 @@ impl FileList {
                     })
                 );
 
-                // 处理点击事件
+                // 处理点击事件 - 目录框特殊逻辑
                 if button_response.double_clicked() && file.is_dir {
-                    // 双击进入文件夹
+                    // 双击目录：目录框进入该目录
                     *current_path = file.path.clone();
                     *selected_file = None;
-                    should_navigate = true;
+                    should_navigate_directory = true;
+                } else if button_response.clicked() && file.is_dir {
+                    // 单击目录：内容框刷新到该目录
+                    *selected_file = Some(file.path.clone());
+                    should_refresh_content = true;
                 } else if button_response.clicked() {
-                    // 单击选择文件或文件夹
+                    // 单击文件：仅选择
                     *selected_file = Some(file.path.clone());
                 }
-            }
-        });
-
-        should_navigate
-    }
-
-    // 专门用于目录框的方法：支持单双击分离逻辑（不包含ScrollArea）
-    pub fn show_for_directory(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> (bool, bool) {
-        let mut should_refresh_content = false;  // 单击目录时刷新内容框
-        let mut should_navigate_directory = false;  // 双击目录时目录框导航
-
-        // 文件列表 - 不包含ScrollArea，由调用者提供
-        for file in &self.files {
-            let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
-
-            // 整行按钮，增大点击区域 - 与内容框完全相同的按钮逻辑
-            let button_response = ui.add_sized(
-                [ui.available_width(), ui.spacing().interact_size.y * 1.5],
-                egui::Button::new(
-                    egui::RichText::new({
-                        let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
-
-                        // 添加文件大小信息
-                        if !file.is_dir {
-                            text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
-                        } else {
-                            text.push_str(" —");
-                        }
-
-                        // 添加修改时间
-                        text.push_str(&format!(" {}", file.modified));
-
-                        text
-                    })
-                )
-                .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
-                .stroke(if is_selected {
-                    egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
-                } else {
-                    egui::Stroke::NONE
-                })
-            );
-
-            // 处理点击事件 - 目录框特殊逻辑
-            if button_response.double_clicked() && file.is_dir {
-                // 双击目录：目录框进入该目录
-                *current_path = file.path.clone();
-                *selected_file = None;
-                should_navigate_directory = true;
-            } else if button_response.clicked() && file.is_dir {
-                // 单击目录：内容框刷新到该目录
-                *selected_file = Some(file.path.clone());
-                should_refresh_content = true;
-            } else if button_response.clicked() {
-                // 单击文件：仅选择
-                *selected_file = Some(file.path.clone());
-            }
+            });
         }
 
         (should_refresh_content, should_navigate_directory)
