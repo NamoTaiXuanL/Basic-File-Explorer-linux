@@ -77,6 +77,8 @@ struct FileExplorerApp {
     directory_list: FileList,  // 使用FileList代替DirectoryTree
     preview: Preview,
     show_hidden: bool,
+    back_stack: Vec<PathBuf>,
+    forward_stack: Vec<PathBuf>,
 }
 
 impl FileExplorerApp {
@@ -98,13 +100,39 @@ impl FileExplorerApp {
             directory_list,
             preview: Preview::new(),
             show_hidden: false,
+            back_stack: Vec::new(),
+            forward_stack: Vec::new(),
         }
     }
 
     fn navigate_to(&mut self, path: PathBuf) {
         if path.is_dir() {
+            if self.current_path != path {
+                self.back_stack.push(self.current_path.clone());
+                self.forward_stack.clear();
+            }
             self.current_path = path.clone();
             self.file_list.refresh(path.clone(), self.show_hidden);
+            self.selected_file = None;
+            self.preview.clear();
+        }
+    }
+
+    fn go_back(&mut self) {
+        if let Some(prev) = self.back_stack.pop() {
+            self.forward_stack.push(self.current_path.clone());
+            self.current_path = prev.clone();
+            self.file_list.refresh(prev, self.show_hidden);
+            self.selected_file = None;
+            self.preview.clear();
+        }
+    }
+
+    fn go_forward(&mut self) {
+        if let Some(next) = self.forward_stack.pop() {
+            self.back_stack.push(self.current_path.clone());
+            self.current_path = next.clone();
+            self.file_list.refresh(next, self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
         }
@@ -206,10 +234,8 @@ impl eframe::App for FileExplorerApp {
                                     self.directory_list.show_for_directory(ui, &mut temp_current_path, &mut self.selected_file);
 
                                 if should_refresh_content {
-                                    // 单击目录：内容框刷新到该目录
                                     if let Some(selected_path) = &self.selected_file {
-                                        self.current_path = selected_path.clone();
-                                        self.refresh_file_list();
+                                        self.navigate_to(selected_path.clone());
                                     }
                                 }
 
@@ -227,13 +253,26 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.45, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            // 固定单行显示的内容标题，超长路径裁剪
-                            let title_text = format!("内容: {}", self.current_path.display());
                             let row_h = ui.spacing().interact_size.y * 1.2;
-                            let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
-                            let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
-                            let color = ui.visuals().text_color();
-                            ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
+                            let total_w = ui.available_width();
+                            let spacing = ui.spacing().item_spacing.x;
+                            let button_w = (total_w - 3.0 * spacing) / 4.0;
+                            ui.horizontal(|ui| {
+                                if ui.add_sized([button_w, row_h], egui::Button::new("返回")).clicked() {
+                                    self.go_back();
+                                }
+                                if ui.add_sized([button_w, row_h], egui::Button::new("前进")).clicked() {
+                                    self.go_forward();
+                                }
+                                if ui.add_sized([button_w, row_h], egui::Button::new("刷新")).clicked() {
+                                    self.refresh_file_list();
+                                }
+                                if ui.add_sized([button_w, row_h], egui::Button::new("主页")).clicked() {
+                                    if let Some(home_dir) = dirs::home_dir() {
+                                        self.navigate_to(home_dir);
+                                    }
+                                }
+                            });
                             ui.separator();
 
                             let button_h = ui.spacing().interact_size.y * 1.5;
@@ -251,11 +290,9 @@ impl eframe::App for FileExplorerApp {
                             egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
                                 let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
                                 if should_navigate {
-                                    // 内容框点击文件夹时：只更新内容框，不刷新目录框
-                                    self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();
-                                    self.refresh_file_list();
-
-                                    // 目录框保持不变，不自动更新
+                                    if let Some(selected_path) = &self.selected_file {
+                                        self.navigate_to(selected_path.clone());
+                                    }
                                 }
                             });
                         }
