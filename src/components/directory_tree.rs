@@ -5,7 +5,6 @@ use crate::utils;
 
 pub struct DirectoryTree {
     tree_nodes: Vec<TreeNode>,
-    expanded_dirs: std::collections::HashSet<PathBuf>,
 }
 
 
@@ -21,7 +20,6 @@ impl DirectoryTree {
     pub fn new() -> Self {
         Self {
             tree_nodes: Vec::new(),
-            expanded_dirs: std::collections::HashSet::new(),
         }
     }
 
@@ -89,11 +87,15 @@ impl DirectoryTree {
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         let mut should_navigate = false;
-        let nodes = self.tree_nodes.clone(); // 简单克隆，避免借用问题
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for node in &nodes {
-                if self.show_node_simple(ui, node, 0, current_path, &mut should_navigate) {
+            // 先收集需要处理的操作，避免借用问题
+            let mut operations = Vec::new();
+            self.collect_node_operations(&self.tree_nodes, 0, current_path, &mut operations);
+
+            // 执行操作并收集导航信号
+            for (node_ref, depth, path) in operations {
+                if self.process_node_interaction(ui, &node_ref, depth, current_path, &mut should_navigate) {
                     should_navigate = true;
                 }
             }
@@ -102,7 +104,17 @@ impl DirectoryTree {
         should_navigate
     }
 
-    fn show_node_simple(
+    fn collect_node_operations(&self, nodes: &[TreeNode], depth: usize, _current_path: &Path, operations: &mut Vec<(TreeNode, usize, PathBuf)>) {
+        for node in nodes {
+            // 克隆节点用于后续处理
+            operations.push((node.clone(), depth, node.path.clone()));
+
+            // 递归收集所有子节点（不检查展开状态）
+            self.collect_node_operations(&node.children, depth + 1, _current_path, operations);
+        }
+    }
+
+    fn process_node_interaction(
         &mut self,
         ui: &mut egui::Ui,
         node: &TreeNode,
@@ -111,7 +123,6 @@ impl DirectoryTree {
         should_navigate: &mut bool,
     ) -> bool {
         let is_selected = current_path == &node.path;
-        let is_expanded = self.expanded_dirs.contains(&node.path);
 
         // 完全模仿内容框的按钮逻辑
         let button_response = ui.add_sized(
@@ -120,13 +131,9 @@ impl DirectoryTree {
                 let indent = "  ".repeat(depth);
 
                 let icon = if node.is_dir {
-                    if is_expanded {
-                        "📂"
-                    } else {
-                        "📁"
-                    }
+                    "📁"  // 目录图标固定为文件夹
                 } else {
-                    "📄"
+                    "📄"  // 文件图标
                 };
 
                 format!("{}{} {}", indent, icon, node.name)
@@ -139,45 +146,15 @@ impl DirectoryTree {
             })
         );
 
+        let mut nav_result = false;
+
         // 完全模仿内容框的点击处理
         if button_response.clicked() && node.is_dir {
             *current_path = node.path.clone();
             *should_navigate = true;
+            nav_result = true;
         }
 
-        // 双击展开/折叠
-        if button_response.double_clicked() && node.is_dir {
-            if is_expanded {
-                self.expanded_dirs.remove(&node.path);
-            } else {
-                self.expanded_dirs.insert(node.path.clone());
-            }
-        }
-
-        // 显示子节点
-        if node.is_dir && is_expanded {
-            for child in &node.children {
-                if self.show_node_simple(ui, child, depth + 1, current_path, should_navigate) {
-                    *should_navigate = true;
-                }
-            }
-        }
-
-        *should_navigate
-    }
-
-    
-    
-    pub fn ensure_path_loaded(&mut self, path: &Path) {
-        // 只展开路径，不重新构建整个目录树
-        self.expand_to_path(path);
-    }
-
-    pub fn expand_to_path(&mut self, path: &Path) {
-        let mut current = path.to_path_buf();
-        while let Some(parent) = current.parent() {
-            self.expanded_dirs.insert(parent.to_path_buf());
-            current = parent.to_path_buf();
-        }
+        nav_result
     }
 }

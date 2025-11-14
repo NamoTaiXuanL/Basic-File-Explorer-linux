@@ -73,7 +73,7 @@ struct FileExplorerApp {
     current_path: PathBuf,
     selected_file: Option<PathBuf>,
     file_list: FileList,
-    directory_tree: DirectoryTree,
+    directory_list: FileList,  // 使用FileList代替DirectoryTree
     preview: Preview,
     show_hidden: bool,
 }
@@ -82,19 +82,20 @@ impl FileExplorerApp {
     fn new() -> Self {
         let current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let mut file_list = FileList::new();
-        let mut directory_tree = DirectoryTree::new();
+        let mut directory_list = FileList::new();
 
-        // 先初始化文件列表
+        // 初始化文件列表
         file_list.refresh(current_path.clone(), false);
 
-        // 简化目录树初始化，只从当前目录开始
-        directory_tree.refresh(&current_path);
+        // 目录列表使用父目录
+        let parent_path = current_path.parent().unwrap_or(&current_path);
+        directory_list.refresh(parent_path.to_path_buf(), false);
 
         Self {
             current_path: current_path.clone(),
             selected_file: None,
             file_list,
-            directory_tree,
+            directory_list,
             preview: Preview::new(),
             show_hidden: false,
         }
@@ -106,16 +107,15 @@ impl FileExplorerApp {
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
-            self.directory_tree.expand_to_path(&path);
         }
     }
 
     fn refresh_current_directory(&mut self) {
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
 
-        // 优化目录树刷新：只在需要时刷新，避免重复构建
-        // 不每次都重新构建整个目录树，只确保当前路径已展开
-        self.directory_tree.ensure_path_loaded(&self.current_path);
+        // 目录列表显示父目录
+        let parent_path = self.current_path.parent().unwrap_or(&self.current_path);
+        self.directory_list.refresh(parent_path.to_path_buf(), self.show_hidden);
     }
 
     fn select_file(&mut self, file: PathBuf) {
@@ -158,17 +158,19 @@ impl eframe::App for FileExplorerApp {
                 // 主内容区域 - 使用剩余的全部高度
                 let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
-                    // 左侧目录树 (25%宽度)
+                    // 左侧目录列表 (25%宽度) - 使用FileList
                     ui.allocate_ui_with_layout(
                         [ui.available_width() * 0.25, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.heading("目录");
                             ui.separator();
-                            let should_navigate = self.directory_tree.show(ui, &mut self.current_path);
-                            if should_navigate {
-                                self.refresh_current_directory();
-                            }
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                let should_navigate = self.directory_list.show(ui, &mut self.current_path, &mut self.selected_file);
+                                if should_navigate {
+                                    self.refresh_current_directory();
+                                }
+                            });
                         }
                     );
 
