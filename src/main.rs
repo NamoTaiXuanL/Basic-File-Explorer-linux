@@ -181,7 +181,12 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.25, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            ui.heading("目录");
+                            let title_text = "目录".to_string();
+                            let row_h = ui.spacing().interact_size.y * 1.2;
+                            let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
+                            let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
+                            let color = ui.visuals().text_color();
+                            ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
                             ui.separator();
 
                             // 返回上级目录按钮
@@ -230,6 +235,17 @@ impl eframe::App for FileExplorerApp {
                             let color = ui.visuals().text_color();
                             ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
                             ui.separator();
+
+                            let button_h = ui.spacing().interact_size.y * 1.5;
+                            let total_w = ui.available_width();
+                            let spacing = ui.spacing().item_spacing.x;
+                            let button_w = (total_w - 3.0 * spacing) / 4.0;
+                            ui.horizontal(|ui| {
+                                if ui.add_sized([button_w, button_h], egui::Button::new("复制")).clicked() {}
+                                if ui.add_sized([button_w, button_h], egui::Button::new("粘贴")).clicked() {}
+                                if ui.add_sized([button_w, button_h], egui::Button::new("重命名")).clicked() {}
+                                if ui.add_sized([button_w, button_h], egui::Button::new("删除")).clicked() {}
+                            });
 
                             // 独立的滚动区域
                             egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
