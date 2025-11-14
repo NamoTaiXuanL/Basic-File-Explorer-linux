@@ -22,3 +22,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 功能完成后及时提交 
 
 
+## AGENTS
+AGENTS文件夹  用于存放你的工作记录
+每次任务完成 请到AGENTS文件夹下添加一个文件  文件名格式为  CLAUDE_AGENT_日期.时间_任务名称_类型_  例如  CLAUDE_AGENT_2025.11.12.05.47_压缩文件_fix.md
+ 每次记录不超过1000字符  保持记录的简洁性 记录重要的信息 不要添加多余的信息
+ 小任务 不超过500字符  

@@ -13,6 +13,7 @@ struct TreeNode {
 pub struct DirectoryTree {
     root_nodes: Vec<TreeNode>,
     show_hidden: bool,
+    current_path: PathBuf,
 }
 
 impl DirectoryTree {
@@ -20,13 +21,21 @@ impl DirectoryTree {
         let mut tree = Self {
             root_nodes: Vec::new(),
             show_hidden: false,
+            current_path: root_path.clone(),
         };
         tree.refresh(root_path);
         tree
     }
 
     pub fn refresh(&mut self, root_path: PathBuf) {
+        self.current_path = root_path.clone();
         self.root_nodes = self.build_tree(&root_path, 0);
+    }
+
+    // 更新当前路径但保持展开状态
+    pub fn update_current_path(&mut self, new_path: &PathBuf) {
+        self.current_path = new_path.clone();
+        // 不重新构建树，保持展开状态
     }
 
     fn build_tree(&self, path: &Path, depth: usize) -> Vec<TreeNode> {
@@ -68,45 +77,52 @@ impl DirectoryTree {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, new_path: &mut Option<PathBuf>, _selected_file: &mut Option<PathBuf>) {
-        let nodes: Vec<_> = self.root_nodes.iter_mut().collect();
-        for node in nodes {
-            if Self::show_node_static(ui, node, new_path, 0) {
-                return;
+        // 使用稳定的迭代器避免闪烁
+        for node in &mut self.root_nodes {
+            if Self::show_node_static(ui, node, new_path, &self.current_path, 0) {
+                // 如果导航了，立即返回避免继续处理
+                break;
             }
         }
     }
 
-    fn show_node_static(ui: &mut egui::Ui, node: &mut TreeNode, new_path: &mut Option<PathBuf>, indent: usize) -> bool {
+    fn show_node_static(ui: &mut egui::Ui, node: &mut TreeNode, new_path: &mut Option<PathBuf>, current_path: &PathBuf, indent: usize) -> bool {
         let indent_space = indent as f32 * 16.0;
+        let is_current_path = current_path == &node.path;
+        let mut navigated = false;
 
-        let mut should_return = false;
         ui.horizontal(|ui| {
             ui.add_space(indent_space);
 
-            // 展开/折叠按钮
-            let expanded_text = if node.is_expanded { "📂" } else { "📁" };
-            if ui.button(expanded_text).clicked() {
+            // 展开/折叠按钮（小箭头）
+            let expand_button = if node.is_expanded { "▼" } else { "▶" };
+            if ui.add_sized([20.0, 20.0], egui::Button::new(expand_button)).clicked() {
                 node.is_expanded = !node.is_expanded;
             }
 
-            // 文件夹名称
-            if ui.selectable_label(
-                false, // TODO: 跟踪当前选中的路径
+            // 文件夹图标
+            ui.label("📁");
+
+            // 文件夹名称 - 可点击导航
+            let folder_label = ui.selectable_label(
+                is_current_path, // 高亮当前选中的路径
                 &node.name
-            ).clicked() {
+            );
+
+            if folder_label.clicked() {
                 *new_path = Some(node.path.clone());
-                should_return = true;
+                navigated = true;
             }
         });
 
-        if should_return {
+        if navigated {
             return true;
         }
 
         if node.is_expanded {
             for child in &mut node.children {
-                if Self::show_node_static(ui, child, new_path, indent + 1) {
-                    return true;
+                if Self::show_node_static(ui, child, new_path, current_path, indent + 1) {
+                    return true; // 如果子节点导航了，也返回true
                 }
             }
         }

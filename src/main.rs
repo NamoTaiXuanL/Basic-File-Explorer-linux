@@ -95,7 +95,7 @@ impl FileExplorerApp {
     fn navigate_to(&mut self, path: PathBuf) {
         if path.is_dir() {
             self.current_path = path.clone();
-            self.directory_tree.refresh(path.clone());
+            self.directory_tree.update_current_path(&path);
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
@@ -169,7 +169,14 @@ impl eframe::App for FileExplorerApp {
                             ui.heading(format!("{}", self.current_path.display()));
                             ui.separator();
                             egui::ScrollArea::both().show(ui, |ui| {
+                                let mut old_path = self.current_path.clone();
                                 self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
+                                // 如果路径发生变化，更新目录树
+                                if old_path != self.current_path {
+                                    self.directory_tree.update_current_path(&self.current_path);
+                                    self.selected_file = None;
+                                    self.preview.clear();
+                                }
                             });
                         }
                     );

@@ -129,14 +129,15 @@ impl FileList {
                         &file.name,
                     );
 
-                    if name_response.clicked() {
+                    if name_response.double_clicked() && file.is_dir {
+                        // 双击进入文件夹
+                        *current_path = file.path.clone();
+                        *selected_file = None;
+                        return true;
+                    } else if name_response.clicked() {
                         if file.is_dir {
-                            // 双击进入文件夹
-                            if name_response.double_clicked() {
-                                *current_path = file.path.clone();
-                                *selected_file = None;
-                                return true;
-                            }
+                            // 单击目录时高亮，不导航
+                            *selected_file = Some(file.path.clone());
                         } else {
                             // 选择文件
                             *selected_file = Some(file.path.clone());
