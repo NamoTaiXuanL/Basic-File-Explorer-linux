@@ -15,6 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 修改要小步快跑 避免一次性修改整个框架的代码
 创造新的功能的时候 实现最小化  只实现必要的功能
 优先在已实现的功能上修改
+避免修改已实现的功能的代码  只修改必要的代码
+
+
 
 ## Git 使用规范
 - 提交信息使用中文，简洁明了

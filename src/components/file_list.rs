@@ -112,21 +112,23 @@ impl FileList {
                 // 整行按钮，增大点击区域
                 let button_response = ui.add_sized(
                     [ui.available_width(), ui.spacing().interact_size.y * 1.5],
-                    egui::Button::new({
-                        let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                    egui::Button::new(
+                        egui::RichText::new({
+                            let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
 
-                        // 添加文件大小信息
-                        if !file.is_dir {
-                            text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
-                        } else {
-                            text.push_str(" —");
-                        }
+                            // 添加文件大小信息
+                            if !file.is_dir {
+                                text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
+                            } else {
+                                text.push_str(" —");
+                            }
 
-                        // 添加修改时间
-                        text.push_str(&format!(" {}", file.modified));
+                            // 添加修改时间
+                            text.push_str(&format!(" {}", file.modified));
 
-                        text
-                    })
+                            text
+                        })
+                    )
                     .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
                     .stroke(if is_selected {
                         egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
@@ -163,21 +165,23 @@ impl FileList {
             // 整行按钮，增大点击区域 - 与内容框完全相同的按钮逻辑
             let button_response = ui.add_sized(
                 [ui.available_width(), ui.spacing().interact_size.y * 1.5],
-                egui::Button::new({
-                    let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                egui::Button::new(
+                    egui::RichText::new({
+                        let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
 
-                    // 添加文件大小信息
-                    if !file.is_dir {
-                        text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
-                    } else {
-                        text.push_str(" —");
-                    }
+                        // 添加文件大小信息
+                        if !file.is_dir {
+                            text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
+                        } else {
+                            text.push_str(" —");
+                        }
 
-                    // 添加修改时间
-                    text.push_str(&format!(" {}", file.modified));
+                        // 添加修改时间
+                        text.push_str(&format!(" {}", file.modified));
 
-                    text
-                })
+                        text
+                    })
+                )
                 .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
                 .stroke(if is_selected {
                     egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
