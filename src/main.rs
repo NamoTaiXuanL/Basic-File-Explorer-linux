@@ -73,6 +73,7 @@ struct FileExplorerApp {
     current_path: PathBuf,
     selected_file: Option<PathBuf>,
     file_list: FileList,
+    directory_tree: DirectoryTree,
     preview: Preview,
     show_hidden: bool,
 }
@@ -81,14 +82,19 @@ impl FileExplorerApp {
     fn new() -> Self {
         let current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let mut file_list = FileList::new();
+        let mut directory_tree = DirectoryTree::new();
 
-        // 初始化时加载文件列表
+        // 先初始化文件列表
         file_list.refresh(current_path.clone(), false);
+
+        // 简化目录树初始化，只从当前目录开始
+        directory_tree.refresh(&current_path);
 
         Self {
             current_path: current_path.clone(),
             selected_file: None,
             file_list,
+            directory_tree,
             preview: Preview::new(),
             show_hidden: false,
         }
@@ -100,11 +106,19 @@ impl FileExplorerApp {
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
+            self.directory_tree.expand_to_path(&path);
         }
     }
 
     fn refresh_current_directory(&mut self) {
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
+        // 刷新目录树到当前路径的父目录
+        if let Some(parent) = self.current_path.parent() {
+            self.directory_tree.refresh(parent);
+        } else {
+            self.directory_tree.refresh(&self.current_path);
+        }
+        self.directory_tree.expand_to_path(&self.current_path);
     }
 
     fn select_file(&mut self, file: PathBuf) {
@@ -147,12 +161,26 @@ impl eframe::App for FileExplorerApp {
                 // 主内容区域 - 使用剩余的全部高度
                 let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
-                    // 左侧文件列表 (60%宽度)
+                    // 左侧目录树 (25%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.6, available_height].into(),
+                        [ui.available_width() * 0.25, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            ui.heading(format!("{}", self.current_path.display()));
+                            ui.heading("目录");
+                            ui.separator();
+                            let should_navigate = self.directory_tree.show(ui, &mut self.current_path);
+                            if should_navigate {
+                                self.refresh_current_directory();
+                            }
+                        }
+                    );
+
+                    // 中间文件列表 (45%宽度)
+                    ui.allocate_ui_with_layout(
+                        [ui.available_width() * 0.45, available_height].into(),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.heading(format!("内容: {}", self.current_path.display()));
                             ui.separator();
                             egui::ScrollArea::both().show(ui, |ui| {
                                 let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
@@ -163,7 +191,7 @@ impl eframe::App for FileExplorerApp {
                         }
                     );
 
-                    // 右侧预览面板 (40%宽度)
+                    // 右侧预览面板 (30%宽度)
                     ui.allocate_ui_with_layout(
                         [ui.available_width(), available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),

@@ -104,66 +104,46 @@ impl FileList {
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> bool {
         let mut should_navigate = false;
 
-        // 表头
-        ui.horizontal(|ui| {
-            ui.label("名称");
-            ui.allocate_ui_with_layout([200.0, ui.spacing().interact_size.y].into(), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label("大小");
-            });
-            ui.allocate_ui_with_layout([100.0, ui.spacing().interact_size.y].into(), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label("修改时间");
-            });
-        });
-
-        ui.separator();
-
         // 文件列表
         egui::ScrollArea::vertical().show(ui, |ui| {
             for file in &self.files {
-                let response = ui.horizontal(|ui| {
-                    // 图标
-                    let icon = utils::get_file_icon(&file.path);
-                    ui.label(icon);
+                let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
 
-                    // 文件名
-                    let name_response = ui.selectable_label(
-                        selected_file.as_ref().map_or(false, |p| p == &file.path),
-                        &file.name,
-                    );
+                // 整行按钮，增大点击区域
+                let button_response = ui.add_sized(
+                    [ui.available_width(), ui.spacing().interact_size.y * 1.5],
+                    egui::Button::new({
+                        let mut text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
 
-                    if name_response.double_clicked() && file.is_dir {
-                        // 双击进入文件夹
-                        *current_path = file.path.clone();
-                        *selected_file = None;
-                        should_navigate = true;
-                    } else if name_response.clicked() {
-                        if file.is_dir {
-                            // 单击目录时高亮，不导航
-                            *selected_file = Some(file.path.clone());
-                        } else {
-                            // 选择文件
-                            *selected_file = Some(file.path.clone());
-                        }
-                    }
-
-                    ui.allocate_ui_with_layout([200.0, ui.spacing().interact_size.y].into(), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // 大小
+                        // 添加文件大小信息
                         if !file.is_dir {
-                            ui.label(utils::get_file_size_str(file.size));
+                            text.push_str(&format!(" {}", utils::get_file_size_str(file.size)));
                         } else {
-                            ui.label("—");
+                            text.push_str(" —");
                         }
-                    });
-                    ui.allocate_ui_with_layout([100.0, ui.spacing().interact_size.y].into(), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // 修改时间
-                        ui.label(&file.modified);
-                    });
 
-                    false
-                }).inner;
+                        // 添加修改时间
+                        text.push_str(&format!(" {}", file.modified));
 
-                if response {
-                    return;
+                        text
+                    })
+                    .fill(if is_selected { ui.visuals().widgets.inactive.bg_fill } else { egui::Color32::TRANSPARENT })
+                    .stroke(if is_selected {
+                        egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
+                    } else {
+                        egui::Stroke::NONE
+                    })
+                );
+
+                // 处理点击事件
+                if button_response.double_clicked() && file.is_dir {
+                    // 双击进入文件夹
+                    *current_path = file.path.clone();
+                    *selected_file = None;
+                    should_navigate = true;
+                } else if button_response.clicked() {
+                    // 单击选择文件或文件夹
+                    *selected_file = Some(file.path.clone());
                 }
             }
         });
