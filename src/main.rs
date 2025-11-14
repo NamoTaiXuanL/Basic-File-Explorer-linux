@@ -206,6 +206,60 @@ impl eframe::App for FileExplorerApp {
 
                 ui.separator();
 
+                // 贯穿式标题栏（目录/导航/预览）
+                {
+                    let total_w = ui.available_width();
+                    let row_h = ui.spacing().interact_size.y * 1.1;
+                    let (rect, _resp) = ui.allocate_exact_size([total_w, row_h].into(), egui::Sense::hover());
+                    let left_w = total_w * 0.25;
+                    let mid_w = total_w * 0.45;
+                    let right_w = total_w - left_w - mid_w;
+
+                    let spacing = ui.spacing().item_spacing.x;
+                    let button_w = (mid_w - 3.0 * spacing) / 4.0;
+                    let button_h = row_h * 0.9;
+
+                    let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
+                    let color = ui.visuals().text_color();
+
+                    // 左侧：目录
+                    let left_rect = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top()), egui::pos2(rect.left() + left_w, rect.bottom()));
+                    ui.painter().with_clip_rect(left_rect).text(egui::pos2(left_rect.left() + 6.0, left_rect.center().y), egui::Align2::LEFT_CENTER, "目录", font_id.clone(), color);
+
+                    // 中间：四个导航按钮
+                    let mid_rect = egui::Rect::from_min_max(egui::pos2(left_rect.right(), rect.top()), egui::pos2(left_rect.right() + mid_w, rect.bottom()));
+                    let mut x = mid_rect.left();
+                    let make_rect = |x0: f32| egui::Rect::from_min_max(egui::pos2(x0, mid_rect.top()), egui::pos2(x0 + button_w, mid_rect.bottom()));
+                    let r_back = make_rect(x);
+                    let resp_back = ui.put(r_back, egui::Button::new("返回").min_size(egui::vec2(button_w, button_h)));
+                    if resp_back.clicked() { self.go_back(); }
+                    x += button_w + spacing;
+                    let r_fwd = make_rect(x);
+                    let resp_fwd = ui.put(r_fwd, egui::Button::new("前进").min_size(egui::vec2(button_w, button_h)));
+                    if resp_fwd.clicked() { self.go_forward(); }
+                    x += button_w + spacing;
+                    let r_refresh = make_rect(x);
+                    let resp_refresh = ui.put(r_refresh, egui::Button::new("刷新").min_size(egui::vec2(button_w, button_h)));
+                    if resp_refresh.clicked() { self.refresh_file_list(); }
+                    x += button_w + spacing;
+                    let r_home = make_rect(x);
+                    let resp_home = ui.put(r_home, egui::Button::new("主页").min_size(egui::vec2(button_w, button_h)));
+                    if resp_home.clicked() {
+                        if let Some(home_dir) = dirs::home_dir() {
+                            self.current_path = home_dir.clone();
+                            self.refresh_file_list();
+                            self.push_history(home_dir);
+                        }
+                    }
+
+                    // 右侧：预览
+                    let right_rect = egui::Rect::from_min_max(egui::pos2(mid_rect.right(), rect.top()), egui::pos2(rect.right(), rect.bottom()));
+                    ui.painter().with_clip_rect(right_rect).text(egui::pos2(right_rect.left() + 6.0, right_rect.center().y), egui::Align2::LEFT_CENTER, "预览", font_id, color);
+                }
+
+                // 统一分割线
+                ui.separator();
+
                 // 主内容区域 - 使用剩余的全部高度
                 let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
@@ -214,13 +268,7 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.25, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            let title_text = "目录".to_string();
-                            let row_h = ui.spacing().interact_size.y * 1.2;
-                            let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
-                            let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
-                            let color = ui.visuals().text_color();
-                            ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
-                            ui.separator();
+                            // 左侧标题由贯穿式标题栏提供
 
                             // 返回上级目录按钮
                             if ui.add_sized(
@@ -261,39 +309,7 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.45, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            // 标题栏改为四个导航按钮：返回/前进/刷新/主页（固定高度）
-                            let row_h = ui.spacing().interact_size.y * 1.2;
-                            let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
-                            let spacing = ui.spacing().item_spacing.x;
-                            let button_w = (rect.width() - 3.0 * spacing) / 4.0;
-                            let button_h = row_h;
-                            let mut x = rect.left();
-
-                            let r_back = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
-                            let resp_back = ui.put(r_back, egui::Button::new("返回").min_size(egui::vec2(button_w, button_h)));
-                            if resp_back.clicked() { self.go_back(); }
-                            x += button_w + spacing;
-
-                            let r_fwd = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
-                            let resp_fwd = ui.put(r_fwd, egui::Button::new("前进").min_size(egui::vec2(button_w, button_h)));
-                            if resp_fwd.clicked() { self.go_forward(); }
-                            x += button_w + spacing;
-
-                            let r_refresh = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
-                            let resp_refresh = ui.put(r_refresh, egui::Button::new("刷新").min_size(egui::vec2(button_w, button_h)));
-                            if resp_refresh.clicked() { self.refresh_file_list(); }
-                            x += button_w + spacing;
-
-                            let r_home = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
-                            let resp_home = ui.put(r_home, egui::Button::new("主页").min_size(egui::vec2(button_w, button_h)));
-                            if resp_home.clicked() {
-                                if let Some(home_dir) = dirs::home_dir() {
-                                    self.current_path = home_dir.clone();
-                                    self.refresh_file_list();
-                                    self.push_history(home_dir);
-                                }
-                            }
-                            ui.separator();
+                            // 中间标题由贯穿式标题栏提供
 
                             let button_h = ui.spacing().interact_size.y * 1.5;
                             let total_w = ui.available_width();
@@ -326,8 +342,7 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width(), available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            ui.heading("预览");
-                            ui.separator();
+                            // 右侧标题由贯穿式标题栏提供
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 if let Some(selected_file) = &self.selected_file {
                                     self.preview.load_preview(selected_file.clone());
