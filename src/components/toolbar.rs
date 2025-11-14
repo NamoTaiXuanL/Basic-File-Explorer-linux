@@ -1,0 +1,74 @@
+use eframe::egui;
+use std::path::PathBuf;
+use dirs;
+
+pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) {
+    ui.horizontal(|ui| {
+        // 导航按钮
+        if ui.add(egui::Button::new("⬅️ 返回").small()).clicked() {
+            if let Some(parent) = current_path.parent() {
+                *current_path = parent.to_path_buf();
+            }
+        }
+
+        if ui.add(egui::Button::new("🏠 主页").small()).clicked() {
+            if let Some(home_dir) = dirs::home_dir() {
+                *current_path = home_dir;
+            }
+        }
+
+        ui.add_space(10.0);
+
+        // 路径输入框
+        ui.label("路径:");
+        let mut path_text = current_path.to_string_lossy().to_string();
+        let response = ui.add_sized(
+            egui::vec2(400.0, 24.0),
+            egui::TextEdit::singleline(&mut path_text)
+        );
+
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let new_path = PathBuf::from(&path_text);
+            if new_path.exists() && new_path.is_dir() {
+                *current_path = new_path;
+            }
+        }
+
+        ui.add_space(10.0);
+
+        // 快捷访问按钮
+        if ui.add(egui::Button::new("📁 新建文件夹").small()).clicked() {
+            // TODO: 实现新建文件夹
+        }
+
+        if ui.add(egui::Button::new("🔄 刷新").small()).clicked() {
+            // TODO: 实现刷新
+        }
+
+        ui.add_space(10.0);
+
+        // 视图切换
+        ui.label("视图:");
+        if ui.add_sized([50.0, 20.0], egui::Button::new("列表")).clicked() {
+            // TODO: 切换到列表视图
+        }
+        if ui.add_sized([50.0, 20.0], egui::Button::new("图标")).clicked() {
+            // TODO: 切换到图标视图
+        }
+        if ui.add_sized([50.0, 20.0], egui::Button::new("详情")).clicked() {
+            // TODO: 切换到详情视图
+        }
+
+        // 右侧对齐剩余空间
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // 搜索框
+            ui.label("搜索:");
+            let mut search_text = String::new();
+            ui.add_sized(
+                egui::vec2(150.0, 24.0),
+                egui::TextEdit::singleline(&mut search_text)
+                    .hint_text("搜索文件...")
+            );
+        });
+    });
+}
