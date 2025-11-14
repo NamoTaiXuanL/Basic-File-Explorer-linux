@@ -69,10 +69,11 @@ impl DirectoryTree {
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         let mut should_navigate = false;
-        let nodes = self.tree_nodes.clone(); // 克隆避免借用冲突
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for node in &nodes {
+            // 直接使用引用，避免克隆
+            let nodes = &self.tree_nodes;
+            for node in nodes {
                 if self.show_node(ui, node, 0, current_path, &mut should_navigate) {
                     should_navigate = true;
                 }
@@ -90,50 +91,52 @@ impl DirectoryTree {
         current_path: &mut PathBuf,
         should_navigate: &mut bool,
     ) -> bool {
-        let indent = (depth as f32) * 20.0;
+        let is_current = current_path == &node.path;
 
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
+        // 整行按钮，使用与内容框相同的点击逻辑
+        let button_response = ui.add_sized(
+            [ui.available_width(), ui.spacing().interact_size.y * 1.5],
+            egui::Button::new({
+                let indent = "  ".repeat(depth);
 
-            let is_expanded = self.expanded_dirs.contains(&node.path);
-            let is_current = current_path == &node.path;
-
-            // 展开/折叠按钮
-            if node.is_dir {
-                let arrow = if is_expanded { "▼" } else { "▶" };
-                if ui.button(arrow).clicked() {
-                    if is_expanded {
-                        self.expanded_dirs.remove(&node.path);
+                let icon = if node.is_dir {
+                    if self.expanded_dirs.contains(&node.path) {
+                        "📂"
                     } else {
-                        self.expanded_dirs.insert(node.path.clone());
+                        "📁"
                     }
-                }
+                } else {
+                    "📄"
+                };
+
+                format!("{}{} {}", indent, icon, node.name)
+            })
+            .fill(if is_current {
+                ui.visuals().widgets.inactive.bg_fill
             } else {
-                ui.add_space(20.0); // 为文件预留空间
-            }
-
-            // 目录/文件名按钮
-            let button_text = if node.is_dir {
-                format!("📁 {}", node.name)
+                egui::Color32::TRANSPARENT
+            })
+            .stroke(if is_current {
+                egui::Stroke::new(1.0, ui.visuals().widgets.active.fg_stroke.color)
             } else {
-                format!("📄 {}", node.name)
-            };
+                egui::Stroke::NONE
+            })
+        );
 
-            let response = ui.add(
-                egui::Button::new(button_text)
-                    .fill(if is_current {
-                        ui.visuals().widgets.inactive.bg_fill
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    })
-                    .small()
-            );
+        // 处理点击事件
+        if button_response.clicked() && node.is_dir {
+            *current_path = node.path.clone();
+            *should_navigate = true;
+        }
 
-            if response.clicked() && node.is_dir {
-                *current_path = node.path.clone();
-                *should_navigate = true;
+        // 处理双击展开/折叠
+        if button_response.double_clicked() && node.is_dir {
+            if self.expanded_dirs.contains(&node.path) {
+                self.expanded_dirs.remove(&node.path);
+            } else {
+                self.expanded_dirs.insert(node.path.clone());
             }
-        });
+        }
 
         // 显示子节点
         if node.is_dir && self.expanded_dirs.contains(&node.path) {
