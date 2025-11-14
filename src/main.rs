@@ -77,6 +77,8 @@ struct FileExplorerApp {
     directory_list: FileList,  // 使用FileList代替DirectoryTree
     preview: Preview,
     show_hidden: bool,
+    nav_history: Vec<PathBuf>,
+    history_pos: usize,
 }
 
 impl FileExplorerApp {
@@ -98,6 +100,8 @@ impl FileExplorerApp {
             directory_list,
             preview: Preview::new(),
             show_hidden: false,
+            nav_history: vec![current_path.clone()],
+            history_pos: 0,
         }
     }
 
@@ -138,6 +142,35 @@ impl FileExplorerApp {
     fn select_file(&mut self, file: PathBuf) {
         self.selected_file = Some(file.clone());
         self.preview.load_preview(file);
+    }
+
+    fn push_history(&mut self, path: PathBuf) {
+        if self.history_pos + 1 < self.nav_history.len() {
+            self.nav_history.truncate(self.history_pos + 1);
+        }
+        self.nav_history.push(path.clone());
+        self.history_pos = self.nav_history.len() - 1;
+    }
+
+    fn can_go_back(&self) -> bool { self.history_pos > 0 }
+    fn can_go_forward(&self) -> bool { self.history_pos + 1 < self.nav_history.len() }
+
+    fn go_back(&mut self) {
+        if self.can_go_back() {
+            self.history_pos -= 1;
+            let path = self.nav_history[self.history_pos].clone();
+            self.current_path = path;
+            self.refresh_file_list();
+        }
+    }
+
+    fn go_forward(&mut self) {
+        if self.can_go_forward() {
+            self.history_pos += 1;
+            let path = self.nav_history[self.history_pos].clone();
+            self.current_path = path;
+            self.refresh_file_list();
+        }
     }
 }
 
@@ -207,9 +240,10 @@ impl eframe::App for FileExplorerApp {
 
                                 if should_refresh_content {
                                     // 单击目录：内容框刷新到该目录
-                                    if let Some(selected_path) = &self.selected_file {
+                                    if let Some(selected_path) = self.selected_file.clone() {
                                         self.current_path = selected_path.clone();
                                         self.refresh_file_list();
+                                        self.push_history(selected_path);
                                     }
                                 }
 
@@ -227,13 +261,38 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.45, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            // 固定单行显示的内容标题，超长路径裁剪
-                            let title_text = format!("内容: {}", self.current_path.display());
+                            // 标题栏改为四个导航按钮：返回/前进/刷新/主页（固定高度）
                             let row_h = ui.spacing().interact_size.y * 1.2;
                             let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
-                            let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
-                            let color = ui.visuals().text_color();
-                            ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
+                            let spacing = ui.spacing().item_spacing.x;
+                            let button_w = (rect.width() - 3.0 * spacing) / 4.0;
+                            let button_h = row_h;
+                            let mut x = rect.left();
+
+                            let r_back = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
+                            let resp_back = ui.put(r_back, egui::Button::new("返回").min_size(egui::vec2(button_w, button_h)));
+                            if resp_back.clicked() { self.go_back(); }
+                            x += button_w + spacing;
+
+                            let r_fwd = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
+                            let resp_fwd = ui.put(r_fwd, egui::Button::new("前进").min_size(egui::vec2(button_w, button_h)));
+                            if resp_fwd.clicked() { self.go_forward(); }
+                            x += button_w + spacing;
+
+                            let r_refresh = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
+                            let resp_refresh = ui.put(r_refresh, egui::Button::new("刷新").min_size(egui::vec2(button_w, button_h)));
+                            if resp_refresh.clicked() { self.refresh_file_list(); }
+                            x += button_w + spacing;
+
+                            let r_home = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + button_w, rect.bottom()));
+                            let resp_home = ui.put(r_home, egui::Button::new("主页").min_size(egui::vec2(button_w, button_h)));
+                            if resp_home.clicked() {
+                                if let Some(home_dir) = dirs::home_dir() {
+                                    self.current_path = home_dir.clone();
+                                    self.refresh_file_list();
+                                    self.push_history(home_dir);
+                                }
+                            }
                             ui.separator();
 
                             let button_h = ui.spacing().interact_size.y * 1.5;
@@ -254,6 +313,7 @@ impl eframe::App for FileExplorerApp {
                                     // 内容框点击文件夹时：只更新内容框，不刷新目录框
                                     self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();
                                     self.refresh_file_list();
+                                    self.push_history(self.current_path.clone());
 
                                     // 目录框保持不变，不自动更新
                                 }
