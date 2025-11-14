@@ -222,7 +222,13 @@ impl eframe::App for FileExplorerApp {
                         [ui.available_width() * 0.45, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            ui.heading(format!("内容: {}", self.current_path.display()));
+                            // 固定单行显示的内容标题，超长路径裁剪
+                            let title_text = format!("内容: {}", self.current_path.display());
+                            let row_h = ui.spacing().interact_size.y * 1.2;
+                            let (rect, _resp) = ui.allocate_exact_size([ui.available_width(), row_h].into(), egui::Sense::hover());
+                            let font_id = ui.style().text_styles.get(&egui::TextStyle::Heading).cloned().unwrap_or_else(|| egui::FontId::default());
+                            let color = ui.visuals().text_color();
+                            ui.painter().with_clip_rect(rect).text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, title_text, font_id, color);
                             ui.separator();
 
                             // 独立的滚动区域

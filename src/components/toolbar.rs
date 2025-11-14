@@ -52,15 +52,15 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
 
         ui.add_space(10.0);
 
-        // 视图切换
+        // 视图切换（与新建/刷新一致的small按钮样式与高度）
         ui.label("视图:");
-        if ui.add_sized([50.0, 20.0], egui::Button::new("列表")).clicked() {
+        if ui.add(egui::Button::new("列表").small()).clicked() {
             // TODO: 切换到列表视图
         }
-        if ui.add_sized([50.0, 20.0], egui::Button::new("图标")).clicked() {
+        if ui.add(egui::Button::new("图标").small()).clicked() {
             // TODO: 切换到图标视图
         }
-        if ui.add_sized([50.0, 20.0], egui::Button::new("详情")).clicked() {
+        if ui.add(egui::Button::new("详情").small()).clicked() {
             // TODO: 切换到详情视图
         }
 

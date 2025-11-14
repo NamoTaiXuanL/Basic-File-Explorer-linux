@@ -214,8 +214,30 @@ impl FileList {
                 let mut x = rect.left();
                 let painter = ui.painter();
                 let name_rect = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + name_w, rect.bottom()));
-                let name_text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
-                painter.with_clip_rect(name_rect).text(egui::pos2(name_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, name_text, font_id.clone(), color);
+
+                // 目录使用彩色图标，文件使用原有emoji
+                if file.is_dir {
+                    let icon_h = rect.height() * 0.55;
+                    let icon_w = icon_h * 1.2;
+                    let cy = rect.center().y;
+                    let icon_x = name_rect.left() + 6.0;
+                    let body_rect = egui::Rect::from_min_max(
+                        egui::pos2(icon_x, cy - icon_h * 0.35),
+                        egui::pos2(icon_x + icon_w, cy + icon_h * 0.35),
+                    );
+                    let tab_rect = egui::Rect::from_min_max(
+                        egui::pos2(icon_x + icon_w * 0.1, body_rect.top() - icon_h * 0.3),
+                        egui::pos2(icon_x + icon_w * 0.45, body_rect.top()),
+                    );
+                    let folder_color = egui::Color32::from_rgb(255, 200, 64);
+                    painter.with_clip_rect(name_rect).rect_filled(body_rect, 3.0, folder_color);
+                    painter.with_clip_rect(name_rect).rect_filled(tab_rect, 2.0, folder_color);
+                    let text_x = body_rect.right() + 6.0;
+                    painter.with_clip_rect(name_rect).text(egui::pos2(text_x, cy), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
+                } else {
+                    let name_text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
+                    painter.with_clip_rect(name_rect).text(egui::pos2(name_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, name_text, font_id.clone(), color);
+                }
                 x += name_w;
                 let modified_rect = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + modified_w, rect.bottom()));
                 painter.with_clip_rect(modified_rect).text(egui::pos2(modified_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, file.modified.clone(), font_id.clone(), color);
@@ -271,7 +293,28 @@ impl FileList {
 
             let font_id = ui.style().text_styles.get(&egui::TextStyle::Body).cloned().unwrap_or_else(|| egui::FontId::default());
             let color = ui.visuals().text_color();
-            ui.painter().with_clip_rect(rect).text(rect.left_center() + egui::vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("{} {}", utils::get_file_icon(&file.path), file.name), font_id, color);
+            let painter = ui.painter();
+            if file.is_dir {
+                let icon_h = rect.height() * 0.55;
+                let icon_w = icon_h * 1.2;
+                let cy = rect.center().y;
+                let icon_x = rect.left() + 6.0;
+                let body_rect = egui::Rect::from_min_max(
+                    egui::pos2(icon_x, cy - icon_h * 0.35),
+                    egui::pos2(icon_x + icon_w, cy + icon_h * 0.35),
+                );
+                let tab_rect = egui::Rect::from_min_max(
+                    egui::pos2(icon_x + icon_w * 0.1, body_rect.top() - icon_h * 0.3),
+                    egui::pos2(icon_x + icon_w * 0.45, body_rect.top()),
+                );
+                let folder_color = egui::Color32::from_rgb(255, 200, 64);
+                painter.with_clip_rect(rect).rect_filled(body_rect, 3.0, folder_color);
+                painter.with_clip_rect(rect).rect_filled(tab_rect, 2.0, folder_color);
+                let text_x = body_rect.right() + 6.0;
+                painter.with_clip_rect(rect).text(egui::pos2(text_x, cy), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
+            } else {
+                painter.with_clip_rect(rect).text(rect.left_center() + egui::vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("{} {}", utils::get_file_icon(&file.path), file.name), font_id, color);
+            }
 
             let button_response = response;
 
