@@ -8,6 +8,11 @@ pub struct DirectoryTree {
     expanded_dirs: std::collections::HashSet<PathBuf>,
 }
 
+enum TreeOperation {
+    Navigate(PathBuf),
+    ToggleExpand(PathBuf),
+}
+
 #[derive(Clone)]
 struct TreeNode {
     path: PathBuf,
@@ -69,13 +74,30 @@ impl DirectoryTree {
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         let mut should_navigate = false;
+        let expanded_dirs = self.expanded_dirs.clone(); // 只克隆一次HashSet
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // 直接使用引用，避免克隆
-            let nodes = &self.tree_nodes;
-            for node in nodes {
-                if self.show_node(ui, node, 0, current_path, &mut should_navigate) {
-                    should_navigate = true;
+            // 收集所有的操作，避免递归中的状态修改
+            let mut operations = Vec::new();
+
+            for node in &self.tree_nodes {
+                self.collect_node_operations(ui, node, 0, current_path, &expanded_dirs, &mut operations);
+            }
+
+            // 处理收集到的操作
+            for operation in operations {
+                match operation {
+                    TreeOperation::Navigate(path) => {
+                        *current_path = path;
+                        should_navigate = true;
+                    }
+                    TreeOperation::ToggleExpand(path) => {
+                        if self.expanded_dirs.contains(&path) {
+                            self.expanded_dirs.remove(&path);
+                        } else {
+                            self.expanded_dirs.insert(path);
+                        }
+                    }
                 }
             }
         });
@@ -83,14 +105,36 @@ impl DirectoryTree {
         should_navigate
     }
 
-    fn show_node(
-        &mut self,
+    fn collect_node_operations(
+        &self,
         ui: &mut egui::Ui,
         node: &TreeNode,
         depth: usize,
-        current_path: &mut PathBuf,
-        should_navigate: &mut bool,
-    ) -> bool {
+        current_path: &PathBuf,
+        expanded_dirs: &std::collections::HashSet<PathBuf>,
+        operations: &mut Vec<TreeOperation>,
+    ) {
+        // 显示当前节点并收集操作
+        if let Some(operation) = self.show_node_with_ops(ui, node, depth, current_path, expanded_dirs) {
+            operations.push(operation);
+        }
+
+        // 显示子节点
+        if node.is_dir && expanded_dirs.contains(&node.path) {
+            for child in &node.children {
+                self.collect_node_operations(ui, child, depth + 1, current_path, expanded_dirs, operations);
+            }
+        }
+    }
+
+    fn show_node_with_ops(
+        &self,
+        ui: &mut egui::Ui,
+        node: &TreeNode,
+        depth: usize,
+        current_path: &PathBuf,
+        expanded_dirs: &std::collections::HashSet<PathBuf>,
+    ) -> Option<TreeOperation> {
         let is_current = current_path == &node.path;
 
         // 整行按钮，使用与内容框相同的点击逻辑
@@ -100,7 +144,7 @@ impl DirectoryTree {
                 let indent = "  ".repeat(depth);
 
                 let icon = if node.is_dir {
-                    if self.expanded_dirs.contains(&node.path) {
+                    if expanded_dirs.contains(&node.path) {
                         "📂"
                     } else {
                         "📁"
@@ -125,29 +169,15 @@ impl DirectoryTree {
 
         // 处理点击事件
         if button_response.clicked() && node.is_dir {
-            *current_path = node.path.clone();
-            *should_navigate = true;
+            return Some(TreeOperation::Navigate(node.path.clone()));
         }
 
         // 处理双击展开/折叠
         if button_response.double_clicked() && node.is_dir {
-            if self.expanded_dirs.contains(&node.path) {
-                self.expanded_dirs.remove(&node.path);
-            } else {
-                self.expanded_dirs.insert(node.path.clone());
-            }
+            return Some(TreeOperation::ToggleExpand(node.path.clone()));
         }
 
-        // 显示子节点
-        if node.is_dir && self.expanded_dirs.contains(&node.path) {
-            for child in &node.children {
-                if self.show_node(ui, child, depth + 1, current_path, should_navigate) {
-                    *should_navigate = true;
-                }
-            }
-        }
-
-        *should_navigate
+        None
     }
 
     pub fn expand_to_path(&mut self, path: &Path) {
