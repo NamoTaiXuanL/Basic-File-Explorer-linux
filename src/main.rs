@@ -72,7 +72,6 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 struct FileExplorerApp {
     current_path: PathBuf,
     selected_file: Option<PathBuf>,
-    directory_tree: DirectoryTree,
     file_list: FileList,
     preview: Preview,
     show_hidden: bool,
@@ -85,7 +84,6 @@ impl FileExplorerApp {
         Self {
             current_path: current_path.clone(),
             selected_file: None,
-            directory_tree: DirectoryTree::new(current_path.clone()),
             file_list: FileList::new(),
             preview: Preview::new(),
             show_hidden: false,
@@ -95,7 +93,6 @@ impl FileExplorerApp {
     fn navigate_to(&mut self, path: PathBuf) {
         if path.is_dir() {
             self.current_path = path.clone();
-            self.directory_tree.update_current_path(&path);
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
@@ -103,7 +100,6 @@ impl FileExplorerApp {
     }
 
     fn refresh_current_directory(&mut self) {
-        self.directory_tree.refresh(self.current_path.clone());
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
     }
 
@@ -144,44 +140,20 @@ impl eframe::App for FileExplorerApp {
                 // 主内容区域 - 使用剩余的全部高度
                 let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
-                    // 左侧目录树 (25%宽度)
+                    // 左侧文件列表 (60%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.25, available_height].into(),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.heading("文件夹");
-                            ui.separator();
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                let mut new_path = None;
-                                self.directory_tree.show(ui, &mut new_path, &mut self.selected_file);
-                                if let Some(path) = new_path {
-                                    self.navigate_to(path);
-                                }
-                            });
-                        }
-                    );
-
-                    // 中间文件列表 (50%宽度)
-                    ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.5, available_height].into(),
+                        [ui.available_width() * 0.6, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.heading(format!("{}", self.current_path.display()));
                             ui.separator();
                             egui::ScrollArea::both().show(ui, |ui| {
-                                let mut old_path = self.current_path.clone();
                                 self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
-                                // 如果路径发生变化，更新目录树
-                                if old_path != self.current_path {
-                                    self.directory_tree.update_current_path(&self.current_path);
-                                    self.selected_file = None;
-                                    self.preview.clear();
-                                }
                             });
                         }
                     );
 
-                    // 右侧预览面板 (25%宽度)
+                    // 右侧预览面板 (40%宽度)
                     ui.allocate_ui_with_layout(
                         [ui.available_width(), available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
