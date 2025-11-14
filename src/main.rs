@@ -19,8 +19,54 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "文件浏览器",
         options,
-        Box::new(|_cc| Ok(Box::new(FileExplorerApp::new()))),
+        Box::new(|cc| {
+            setup_custom_fonts(&cc.egui_ctx);
+            Ok(Box::new(FileExplorerApp::new()))
+        }),
     )
+}
+
+fn setup_custom_fonts(ctx: &egui::Context) {
+    // 设置字体以支持中文显示
+    let mut fonts = egui::FontDefinitions::default();
+
+    // 尝试加载系统中文字体 - 使用更通用的方法
+    if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
+        // 微软雅黑
+        fonts.font_data.insert("microsoft_yahei".to_owned(), egui::FontData::from_owned(font_data));
+
+        // 将中文字体添加到所有字体族
+        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "microsoft_yahei".to_owned());
+        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "microsoft_yahei".to_owned());
+    } else if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/simhei.ttf") {
+        // 黑体
+        fonts.font_data.insert("simhei".to_owned(), egui::FontData::from_owned(font_data));
+
+        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "simhei".to_owned());
+        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "simhei".to_owned());
+    } else if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/simsun.ttc") {
+        // 宋体
+        fonts.font_data.insert("simsun".to_owned(), egui::FontData::from_owned(font_data));
+
+        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "simsun".to_owned());
+        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "simsun".to_owned());
+    } else {
+        // 如果都找不到，尝试使用默认字体的备用方案
+        eprintln!("警告: 未找到中文字体，中文可能显示为方块");
+    }
+
+    ctx.set_fonts(fonts);
+
+    // 设置合适的字体大小
+    let mut style = (*ctx.style()).clone();
+    style.text_styles = [
+        (egui::TextStyle::Heading, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
+        (egui::TextStyle::Body, egui::FontId::new(14.0, egui::FontFamily::Proportional)),
+        (egui::TextStyle::Monospace, egui::FontId::new(13.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Button, egui::FontId::new(14.0, egui::FontFamily::Proportional)),
+        (egui::TextStyle::Small, egui::FontId::new(12.0, egui::FontFamily::Proportional)),
+    ].into();
+    ctx.set_style(style);
 }
 
 struct FileExplorerApp {
@@ -95,11 +141,12 @@ impl eframe::App for FileExplorerApp {
 
                 ui.separator();
 
-                // 主内容区域
+                // 主内容区域 - 使用剩余的全部高度
+                let available_height = ui.available_height() - 40.0; // 留一些边距
                 ui.horizontal(|ui| {
                     // 左侧目录树 (25%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.25, ui.available_height()].into(),
+                        [ui.available_width() * 0.25, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.heading("文件夹");
@@ -116,7 +163,7 @@ impl eframe::App for FileExplorerApp {
 
                     // 中间文件列表 (50%宽度)
                     ui.allocate_ui_with_layout(
-                        [ui.available_width() * 0.5, ui.available_height()].into(),
+                        [ui.available_width() * 0.5, available_height].into(),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.heading(format!("{}", self.current_path.display()));
@@ -128,16 +175,20 @@ impl eframe::App for FileExplorerApp {
                     );
 
                     // 右侧预览面板 (25%宽度)
-                    ui.vertical(|ui| {
-                        ui.heading("预览");
-                        ui.separator();
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            if let Some(selected_file) = &self.selected_file {
-                                self.preview.load_preview(selected_file.clone());
-                            }
-                            self.preview.show(ui);
-                        });
-                    });
+                    ui.allocate_ui_with_layout(
+                        [ui.available_width(), available_height].into(),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.heading("预览");
+                            ui.separator();
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                if let Some(selected_file) = &self.selected_file {
+                                    self.preview.load_preview(selected_file.clone());
+                                }
+                                self.preview.show(ui);
+                            });
+                        }
+                    );
                 });
             });
         });
