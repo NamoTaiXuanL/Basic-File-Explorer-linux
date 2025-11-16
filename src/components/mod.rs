@@ -3,9 +3,11 @@ pub mod preview;
 pub mod menu_bar;
 pub mod toolbar;
 pub mod mouse_strategy;
+pub mod file_operations;
 
 pub use file_list::*;
 pub use preview::*;
 pub use menu_bar::*;
 pub use toolbar::*;
 pub use mouse_strategy::*;
+pub use file_operations::*;

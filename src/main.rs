@@ -76,11 +76,17 @@ struct FileExplorerApp {
     file_list: FileList,
     directory_list: FileList,  // 使用FileList代替DirectoryTree
     preview: Preview,
+    file_operations: FileOperations,
     show_hidden: bool,
     nav_history: Vec<PathBuf>,
     history_pos: usize,
     left_ratio: f32,
     mid_ratio: f32,
+    // 对话框状态
+    show_rename_dialog: bool,
+    rename_input: String,
+    show_delete_confirmation: bool,
+    delete_confirmation_message: String,
 }
 
 impl FileExplorerApp {
@@ -101,11 +107,16 @@ impl FileExplorerApp {
             file_list,
             directory_list,
             preview: Preview::new(),
+            file_operations: FileOperations::new(),
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
             left_ratio: 0.25,
             mid_ratio: 0.45,
+            show_rename_dialog: false,
+            rename_input: String::new(),
+            show_delete_confirmation: false,
+            delete_confirmation_message: String::new(),
         }
     }
 
@@ -336,10 +347,84 @@ impl eframe::App for FileExplorerApp {
                             let spacing = ui.spacing().item_spacing.x;
                             let button_w = (total_w - 3.0 * spacing) / 4.0;
                             ui.horizontal(|ui| {
-                                if ui.add(egui::Button::new("复制").min_size(egui::vec2(button_w, button_h))).clicked() {}
-                                if ui.add(egui::Button::new("粘贴").min_size(egui::vec2(button_w, button_h))).clicked() {}
-                                if ui.add(egui::Button::new("重命名").min_size(egui::vec2(button_w, button_h))).clicked() {}
-                                if ui.add(egui::Button::new("删除").min_size(egui::vec2(button_w, button_h))).clicked() {}
+                                // 复制按钮
+                                if ui.add(egui::Button::new("复制").min_size(egui::vec2(button_w, button_h))).clicked() {
+                                    if let Some(ref path) = self.selected_file {
+                                        self.file_operations.copy_to_clipboard(vec![path.clone()]);
+                                    }
+                                }
+
+                                // 粘贴按钮
+                                if ui.add(egui::Button::new("粘贴").min_size(egui::vec2(button_w, button_h))).clicked() {
+                                    if let Some(ref path) = self.selected_file {
+                                        // 如果选中的是目录，粘贴到该目录
+                                        if path.is_dir() {
+                                            match self.file_operations.paste_from_clipboard(path) {
+                                                FileOperationResult::Success => {
+                                                    self.refresh_file_list();
+                                                }
+                                                FileOperationResult::Error(msg) => {
+                                                    // TODO: 显示错误消息
+                                                    eprintln!("粘贴错误: {}", msg);
+                                                }
+                                                FileOperationResult::NeedsConfirmation(_) => {}
+                                            }
+                                        } else {
+                                            // 如果选中的是文件，粘贴到文件所在目录
+                                            if let Some(parent) = path.parent() {
+                                                match self.file_operations.paste_from_clipboard(parent) {
+                                                    FileOperationResult::Success => {
+                                                        self.refresh_file_list();
+                                                    }
+                                                    FileOperationResult::Error(msg) => {
+                                                        eprintln!("粘贴错误: {}", msg);
+                                                    }
+                                                    FileOperationResult::NeedsConfirmation(_) => {}
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // 没有选中文件时，粘贴到当前目录
+                                        match self.file_operations.paste_from_clipboard(&self.current_path) {
+                                            FileOperationResult::Success => {
+                                                self.refresh_file_list();
+                                            }
+                                            FileOperationResult::Error(msg) => {
+                                                eprintln!("粘贴错误: {}", msg);
+                                            }
+                                            FileOperationResult::NeedsConfirmation(_) => {}
+                                        }
+                                    }
+                                }
+
+                                // 重命名按钮
+                                if ui.add(egui::Button::new("重命名").min_size(egui::vec2(button_w, button_h))).clicked() {
+                                    if let Some(ref path) = self.selected_file {
+                                        self.rename_input = path.file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        self.show_rename_dialog = true;
+                                    }
+                                }
+
+                                // 删除按钮
+                                if ui.add(egui::Button::new("删除").min_size(egui::vec2(button_w, button_h))).clicked() {
+                                    if let Some(ref path) = self.selected_file {
+                                        match self.file_operations.delete_files(&[path.clone()]) {
+                                            FileOperationResult::NeedsConfirmation(message) => {
+                                                self.delete_confirmation_message = message;
+                                                self.show_delete_confirmation = true;
+                                            }
+                                            FileOperationResult::Error(msg) => {
+                                                eprintln!("删除错误: {}", msg);
+                                            }
+                                            FileOperationResult::Success => {
+                                                // 这个情况不应该发生，删除总是需要确认
+                                            }
+                                        }
+                                    }
+                                }
                             });
 
                             // 独立的滚动区域
@@ -374,5 +459,86 @@ impl eframe::App for FileExplorerApp {
                 });
             });
         });
+
+        // 显示重命名对话框
+        if self.show_rename_dialog {
+            let mut open = true;
+            egui::Window::new("重命名")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("新名称:");
+                        ui.text_edit_singleline(&mut self.rename_input);
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() {
+                            if let Some(ref path) = self.selected_file {
+                                match self.file_operations.rename_file(path, &self.rename_input) {
+                                    FileOperationResult::Success => {
+                                        self.refresh_file_list();
+                                        self.show_rename_dialog = false;
+                                    }
+                                    FileOperationResult::Error(msg) => {
+                                        eprintln!("重命名错误: {}", msg);
+                                        // TODO: 显示错误消息给用户
+                                    }
+                                    FileOperationResult::NeedsConfirmation(_) => {}
+                                }
+                            }
+                        }
+                        if ui.button("取消").clicked() {
+                            self.show_rename_dialog = false;
+                        }
+                    });
+                });
+
+            if !open {
+                self.show_rename_dialog = false;
+            }
+        }
+
+        // 显示删除确认对话框
+        if self.show_delete_confirmation {
+            let mut open = true;
+            egui::Window::new("确认删除")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label(&self.delete_confirmation_message);
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() {
+                            if let Some(ref path) = self.selected_file {
+                                match self.file_operations.confirm_delete(&[path.clone()]) {
+                                    FileOperationResult::Success => {
+                                        self.selected_file = None;
+                                        self.refresh_file_list();
+                                        self.show_delete_confirmation = false;
+                                    }
+                                    FileOperationResult::Error(msg) => {
+                                        eprintln!("删除错误: {}", msg);
+                                        self.show_delete_confirmation = false;
+                                    }
+                                    FileOperationResult::NeedsConfirmation(_) => {}
+                                }
+                            }
+                        }
+                        if ui.button("取消").clicked() {
+                            self.show_delete_confirmation = false;
+                        }
+                    });
+                });
+
+            if !open {
+                self.show_delete_confirmation = false;
+            }
+        }
     }
 }
