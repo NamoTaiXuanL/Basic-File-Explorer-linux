@@ -216,11 +216,17 @@ impl eframe::App for FileExplorerApp {
             // 顶部菜单栏和工具栏
             ui.vertical(|ui| {
                 // 菜单栏
-                let (menu_needs_refresh, menu_should_rename, menu_should_delete, menu_should_create_folder) =
+                let (menu_needs_refresh, menu_should_paste, menu_should_rename, menu_should_delete, menu_should_create_folder) =
                     menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system);
 
+                // 处理菜单栏的刷新请求（来自查看和转到功能）
                 if menu_needs_refresh {
-                    // 处理粘贴操作
+                    self.refresh_file_list();
+                    self.refresh_directory_list();
+                }
+
+                // 处理菜单栏的粘贴请求
+                if menu_should_paste {
                     match self.file_operations.paste_from_clipboard(&self.current_path) {
                         FileOperationResult::Success => {
                             self.refresh_file_list();

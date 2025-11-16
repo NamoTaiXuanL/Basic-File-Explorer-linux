@@ -12,8 +12,9 @@ pub fn show_menu_bar(
     file_operations: &mut FileOperations,
     selected_file: &Option<PathBuf>,
     help_system: &mut HelpSystem
-) -> (bool, bool, bool, bool) {
+) -> (bool, bool, bool, bool, bool) {
     let mut needs_refresh = false;
+    let mut should_paste = false;
     let mut should_rename = false;
     let mut should_delete = false;
     let mut should_create_folder = false;
@@ -77,7 +78,7 @@ pub fn show_menu_bar(
             // 在实际使用中，你可能需要调用 file_operations.has_clipboard_content()
             if ui.button("粘贴").clicked() {
                 // 粘贴功能需要在主程序中处理，因为需要知道当前路径
-                needs_refresh = true;
+                should_paste = true;
                 ui.close_menu();
             }
 
@@ -112,24 +113,28 @@ pub fn show_menu_bar(
             if ui.button("主页").clicked() {
                 if let Some(home_dir) = dirs::home_dir() {
                     *current_path = home_dir;
+                    needs_refresh = true;
                 }
                 ui.close_menu();
             }
             if ui.button("桌面").clicked() {
                 if let Some(desktop_dir) = dirs::desktop_dir() {
                     *current_path = desktop_dir;
+                    needs_refresh = true;
                 }
                 ui.close_menu();
             }
             if ui.button("文档").clicked() {
                 if let Some(doc_dir) = dirs::document_dir() {
                     *current_path = doc_dir;
+                    needs_refresh = true;
                 }
                 ui.close_menu();
             }
             if ui.button("下载").clicked() {
                 if let Some(download_dir) = dirs::download_dir() {
                     *current_path = download_dir;
+                    needs_refresh = true;
                 }
                 ui.close_menu();
             }
@@ -137,6 +142,7 @@ pub fn show_menu_bar(
             if ui.button("上一级").clicked() {
                 if let Some(parent) = current_path.parent() {
                     *current_path = parent.to_path_buf();
+                    needs_refresh = true;
                 }
                 ui.close_menu();
             }
@@ -150,5 +156,5 @@ pub fn show_menu_bar(
         });
     });
 
-    (needs_refresh, should_rename, should_delete, should_create_folder)
+    (needs_refresh, should_paste, should_rename, should_delete, should_create_folder)
 }
