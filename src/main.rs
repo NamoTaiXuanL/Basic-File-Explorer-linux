@@ -78,6 +78,7 @@ struct FileExplorerApp {
     preview: Preview,
     file_operations: FileOperations,
     create_operations: CreateOperations,
+    help_system: HelpSystem,
     show_hidden: bool,
     nav_history: Vec<PathBuf>,
     history_pos: usize,
@@ -112,6 +113,7 @@ impl FileExplorerApp {
             preview: Preview::new(),
             file_operations: FileOperations::new(),
             create_operations: CreateOperations::new(),
+            help_system: HelpSystem::new(),
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
@@ -215,7 +217,7 @@ impl eframe::App for FileExplorerApp {
             ui.vertical(|ui| {
                 // 菜单栏
                 let (menu_needs_refresh, menu_should_rename, menu_should_delete, menu_should_create_folder) =
-                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file);
+                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system);
 
                 if menu_needs_refresh {
                     // 处理粘贴操作
@@ -610,6 +612,11 @@ impl eframe::App for FileExplorerApp {
             if !open {
                 self.show_new_folder_dialog = false;
             }
+        }
+
+        // 显示帮助系统对话框（关于对话框等）
+        if self.help_system.is_about_dialog_showing() {
+            self.help_system.show_about_dialog(ctx);
         }
     }
 }

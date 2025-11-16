@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use dirs;
 use super::file_operations::{FileOperations, FileOperationResult};
 use super::create_operations::generate_default_folder_name;
+use super::help::HelpSystem;
 
 pub fn show_menu_bar(
     ui: &mut egui::Ui,
     current_path: &mut PathBuf,
     show_hidden: &mut bool,
     file_operations: &mut FileOperations,
-    selected_file: &Option<PathBuf>
+    selected_file: &Option<PathBuf>,
+    help_system: &mut HelpSystem
 ) -> (bool, bool, bool, bool) {
     let mut needs_refresh = false;
     let mut should_rename = false;
@@ -142,7 +144,7 @@ pub fn show_menu_bar(
 
         ui.menu_button("帮助", |ui| {
             if ui.button("关于").clicked() {
-                // TODO: 显示关于对话框
+                help_system.show_about();
                 ui.close_menu();
             }
         });
