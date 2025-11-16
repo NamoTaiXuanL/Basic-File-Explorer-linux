@@ -2,6 +2,7 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::fs;
 use crate::utils;
+use super::mouse_strategy::MouseDoubleClickStrategy;
 
 #[derive(Clone)]
 struct FileItem {
@@ -20,6 +21,7 @@ pub struct FileList {
     col_modified_ratio: f32,
     col_type_ratio: f32,
     col_size_ratio: f32,
+    mouse_strategy: MouseDoubleClickStrategy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,7 @@ impl FileList {
             col_modified_ratio: 0.2,
             col_type_ratio: 0.15,
             col_size_ratio: 0.15,
+            mouse_strategy: MouseDoubleClickStrategy::new(),
         }
     }
 
@@ -262,6 +265,9 @@ impl FileList {
                     *current_path = file.path.clone();
                     *selected_file = None;
                     should_navigate = true;
+                } else if button_response.double_clicked() && !file.is_dir {
+                    // 双击文件：使用默认程序打开
+                    self.mouse_strategy.handle_double_click(file.path.clone());
                 } else if button_response.clicked() {
                     // 单击选择文件或文件夹
                     *selected_file = Some(file.path.clone());
@@ -273,9 +279,10 @@ impl FileList {
     }
 
     // 专门用于目录框的方法：支持单双击分离逻辑（不包含ScrollArea）
-    pub fn show_for_directory(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> (bool, bool) {
+    pub fn show_for_directory(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> (bool, bool, bool) {
         let mut should_refresh_content = false;  // 单击目录时刷新内容框
         let mut should_navigate_directory = false;  // 双击目录时目录框导航
+        let mut should_open_file = false;  // 双击文件时打开文件
 
         // 文件列表 - 不包含ScrollArea，由调用者提供
         for file in &self.files {
@@ -324,6 +331,9 @@ impl FileList {
                 *current_path = file.path.clone();
                 *selected_file = None;
                 should_navigate_directory = true;
+            } else if button_response.double_clicked() && !file.is_dir {
+                // 双击文件：使用默认程序打开
+                should_open_file = self.mouse_strategy.handle_double_click(file.path.clone());
             } else if button_response.clicked() && file.is_dir {
                 // 单击目录：内容框刷新到该目录
                 *selected_file = Some(file.path.clone());
@@ -334,6 +344,6 @@ impl FileList {
             }
         }
 
-        (should_refresh_content, should_navigate_directory)
+        (should_refresh_content, should_navigate_directory, should_open_file)
     }
 }

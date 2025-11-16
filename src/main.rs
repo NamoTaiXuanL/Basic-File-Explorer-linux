@@ -293,7 +293,7 @@ impl eframe::App for FileExplorerApp {
                             // 独立的滚动区域
                             let mut temp_current_path = self.directory_current_path.clone();
                             egui::ScrollArea::vertical().id_salt("directory_scroll").show(ui, |ui| {
-                                let (should_refresh_content, should_navigate_directory) =
+                                let (should_refresh_content, should_navigate_directory, should_open_file) =
                                     self.directory_list.show_for_directory(ui, &mut temp_current_path, &mut self.selected_file);
 
                                 if should_refresh_content {
@@ -309,6 +309,11 @@ impl eframe::App for FileExplorerApp {
                                     // 双击目录：目录框进入该目录
                                     self.directory_current_path = temp_current_path.clone();
                                     self.refresh_directory_list();
+                                }
+
+                                if should_open_file {
+                                    // 双击文件：文件已通过mouse_strategy打开
+                                    // 这里可以添加成功打开的提示，如果需要的话
                                 }
                             });
                         }
