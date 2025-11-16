@@ -77,6 +77,7 @@ struct FileExplorerApp {
     directory_list: FileList,  // 使用FileList代替DirectoryTree
     preview: Preview,
     file_operations: FileOperations,
+    create_operations: CreateOperations,
     show_hidden: bool,
     nav_history: Vec<PathBuf>,
     history_pos: usize,
@@ -87,6 +88,8 @@ struct FileExplorerApp {
     rename_input: String,
     show_delete_confirmation: bool,
     delete_confirmation_message: String,
+    show_new_folder_dialog: bool,
+    new_folder_name: String,
 }
 
 impl FileExplorerApp {
@@ -108,6 +111,7 @@ impl FileExplorerApp {
             directory_list,
             preview: Preview::new(),
             file_operations: FileOperations::new(),
+            create_operations: CreateOperations::new(),
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
@@ -117,6 +121,8 @@ impl FileExplorerApp {
             rename_input: String::new(),
             show_delete_confirmation: false,
             delete_confirmation_message: String::new(),
+            show_new_folder_dialog: false,
+            new_folder_name: String::new(),
         }
     }
 
@@ -208,20 +214,69 @@ impl eframe::App for FileExplorerApp {
             // 顶部菜单栏和工具栏
             ui.vertical(|ui| {
                 // 菜单栏
-                let menu_needs_refresh = menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden);
+                let (menu_needs_refresh, menu_should_rename, menu_should_delete, menu_should_create_folder) =
+                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file);
+
                 if menu_needs_refresh {
-                    // 菜单栏状态改变时，刷新所有列表
-                    self.refresh_file_list();
-                    self.refresh_directory_list();
+                    // 处理粘贴操作
+                    match self.file_operations.paste_from_clipboard(&self.current_path) {
+                        FileOperationResult::Success => {
+                            self.refresh_file_list();
+                            self.refresh_directory_list();
+                        }
+                        FileOperationResult::Error(msg) => {
+                            eprintln!("粘贴错误: {}", msg);
+                        }
+                        FileOperationResult::NeedsConfirmation(_) => {}
+                    }
+                }
+
+                // 处理菜单栏的重命名请求
+                if menu_should_rename {
+                    if let Some(ref path) = self.selected_file {
+                        self.rename_input = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        self.show_rename_dialog = true;
+                    }
+                }
+
+                // 处理菜单栏的删除请求
+                if menu_should_delete {
+                    if let Some(ref path) = self.selected_file {
+                        match self.file_operations.delete_files(&[path.clone()]) {
+                            FileOperationResult::NeedsConfirmation(message) => {
+                                self.delete_confirmation_message = message;
+                                self.show_delete_confirmation = true;
+                            }
+                            FileOperationResult::Error(msg) => {
+                                eprintln!("删除错误: {}", msg);
+                            }
+                            FileOperationResult::Success => {}
+                        }
+                    }
+                }
+
+                // 处理菜单栏的新建文件夹请求
+                if menu_should_create_folder {
+                    self.new_folder_name = generate_default_folder_name(&self.current_path);
+                    self.show_new_folder_dialog = true;
                 }
 
                 ui.separator();
 
                 // 工具栏
-                let mut needs_refresh = toolbar::show_toolbar(ui, &mut self.current_path);
-                if needs_refresh {
+                let (toolbar_needs_refresh, toolbar_should_create_folder) = toolbar::show_toolbar(ui, &mut self.current_path);
+                if toolbar_needs_refresh {
                     // 工具栏只影响内容框，不影响目录框
                     self.refresh_file_list();
+                }
+
+                // 处理新建文件夹请求
+                if toolbar_should_create_folder {
+                    self.new_folder_name = generate_default_folder_name(&self.current_path);
+                    self.show_new_folder_dialog = true;
                 }
 
                 ui.separator();
@@ -356,44 +411,16 @@ impl eframe::App for FileExplorerApp {
 
                                 // 粘贴按钮
                                 if ui.add(egui::Button::new("粘贴").min_size(egui::vec2(button_w, button_h))).clicked() {
-                                    if let Some(ref path) = self.selected_file {
-                                        // 如果选中的是目录，粘贴到该目录
-                                        if path.is_dir() {
-                                            match self.file_operations.paste_from_clipboard(path) {
-                                                FileOperationResult::Success => {
-                                                    self.refresh_file_list();
-                                                }
-                                                FileOperationResult::Error(msg) => {
-                                                    // TODO: 显示错误消息
-                                                    eprintln!("粘贴错误: {}", msg);
-                                                }
-                                                FileOperationResult::NeedsConfirmation(_) => {}
-                                            }
-                                        } else {
-                                            // 如果选中的是文件，粘贴到文件所在目录
-                                            if let Some(parent) = path.parent() {
-                                                match self.file_operations.paste_from_clipboard(parent) {
-                                                    FileOperationResult::Success => {
-                                                        self.refresh_file_list();
-                                                    }
-                                                    FileOperationResult::Error(msg) => {
-                                                        eprintln!("粘贴错误: {}", msg);
-                                                    }
-                                                    FileOperationResult::NeedsConfirmation(_) => {}
-                                                }
-                                            }
+                                    // 总是粘贴到当前路径（内容框的当前目录）
+                                    match self.file_operations.paste_from_clipboard(&self.current_path) {
+                                        FileOperationResult::Success => {
+                                            self.refresh_file_list();
                                         }
-                                    } else {
-                                        // 没有选中文件时，粘贴到当前目录
-                                        match self.file_operations.paste_from_clipboard(&self.current_path) {
-                                            FileOperationResult::Success => {
-                                                self.refresh_file_list();
-                                            }
-                                            FileOperationResult::Error(msg) => {
-                                                eprintln!("粘贴错误: {}", msg);
-                                            }
-                                            FileOperationResult::NeedsConfirmation(_) => {}
+                                        FileOperationResult::Error(msg) => {
+                                            // TODO: 显示错误消息
+                                            eprintln!("粘贴错误: {}", msg);
                                         }
+                                        FileOperationResult::NeedsConfirmation(_) => {}
                                     }
                                 }
 
@@ -466,6 +493,7 @@ impl eframe::App for FileExplorerApp {
             egui::Window::new("重命名")
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -508,6 +536,7 @@ impl eframe::App for FileExplorerApp {
             egui::Window::new("确认删除")
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.label(&self.delete_confirmation_message);
@@ -538,6 +567,48 @@ impl eframe::App for FileExplorerApp {
 
             if !open {
                 self.show_delete_confirmation = false;
+            }
+        }
+
+        // 显示新建文件夹对话框
+        if self.show_new_folder_dialog {
+            let mut open = true;
+            egui::Window::new("新建文件夹")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("文件夹名称:");
+                        ui.text_edit_singleline(&mut self.new_folder_name);
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() {
+                            match self.create_operations.create_folder(&self.current_path, &self.new_folder_name) {
+                                CreateOperationResult::Success => {
+                                    self.refresh_file_list();
+                                    self.show_new_folder_dialog = false;
+                                }
+                                CreateOperationResult::Error(msg) => {
+                                    eprintln!("新建文件夹错误: {}", msg);
+                                    // TODO: 显示错误消息给用户
+                                }
+                                CreateOperationResult::NeedsConfirmation(_) => {}
+                                CreateOperationResult::NeedsInput(_) => {}
+                            }
+                        }
+                        if ui.button("取消").clicked() {
+                            self.show_new_folder_dialog = false;
+                        }
+                    });
+                });
+
+            if !open {
+                self.show_new_folder_dialog = false;
             }
         }
     }

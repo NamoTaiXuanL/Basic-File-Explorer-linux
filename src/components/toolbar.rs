@@ -1,9 +1,11 @@
 use eframe::egui;
 use std::path::PathBuf;
 use dirs;
+use super::create_operations::{CreateOperations, CreateOperationResult};
 
-pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
+pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> (bool, bool) {
     let mut needs_refresh = false;
+    let mut should_create_folder = false;
 
     ui.horizontal(|ui| {
         // 导航按钮
@@ -43,7 +45,7 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
 
         // 快捷访问按钮
         if ui.add(egui::Button::new("📁 新建文件夹").small()).clicked() {
-            // TODO: 实现新建文件夹
+            should_create_folder = true;
         }
 
         if ui.add(egui::Button::new("🔄 刷新").small()).clicked() {
@@ -77,5 +79,5 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         });
     });
 
-    needs_refresh
+    (needs_refresh, should_create_folder)
 }
