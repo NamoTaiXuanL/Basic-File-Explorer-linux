@@ -197,7 +197,12 @@ impl eframe::App for FileExplorerApp {
             // 顶部菜单栏和工具栏
             ui.vertical(|ui| {
                 // 菜单栏
-                menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden);
+                let menu_needs_refresh = menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden);
+                if menu_needs_refresh {
+                    // 菜单栏状态改变时，刷新所有列表
+                    self.refresh_file_list();
+                    self.refresh_directory_list();
+                }
 
                 ui.separator();
 

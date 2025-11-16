@@ -58,7 +58,7 @@ impl FileList {
                     .to_string();
 
                 // 跳过隐藏文件
-                if !show_hidden && name.starts_with('.') {
+                if !show_hidden && self.is_hidden_file(&entry_path, &name) {
                     continue;
                 }
 
@@ -276,6 +276,28 @@ impl FileList {
         });
 
         should_navigate
+    }
+
+    // 检查文件是否为隐藏文件
+    fn is_hidden_file(&self, file_path: &PathBuf, file_name: &str) -> bool {
+        // Unix/Linux系统：以.开头的文件
+        if file_name.starts_with('.') {
+            return true;
+        }
+
+        // Windows系统：检查文件属性
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                use std::os::windows::fs::MetadataExt;
+                const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+                if (metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN) != 0 {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     // 专门用于目录框的方法：支持单双击分离逻辑（不包含ScrollArea）

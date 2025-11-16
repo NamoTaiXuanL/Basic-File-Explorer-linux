@@ -2,7 +2,9 @@ use eframe::egui;
 use std::path::PathBuf;
 use dirs;
 
-pub fn show_menu_bar(ui: &mut egui::Ui, current_path: &mut PathBuf, show_hidden: &mut bool) {
+pub fn show_menu_bar(ui: &mut egui::Ui, current_path: &mut PathBuf, show_hidden: &mut bool) -> bool {
+    let mut needs_refresh = false;
+
     egui::menu::bar(ui, |ui| {
         ui.menu_button("文件", |ui| {
             if ui.button("新建文件夹").clicked() {
@@ -41,6 +43,7 @@ pub fn show_menu_bar(ui: &mut egui::Ui, current_path: &mut PathBuf, show_hidden:
 
         ui.menu_button("查看", |ui| {
             if ui.checkbox(show_hidden, "显示隐藏文件").changed() {
+                needs_refresh = true;
                 ui.close_menu();
             }
             ui.separator();
@@ -99,4 +102,6 @@ pub fn show_menu_bar(ui: &mut egui::Ui, current_path: &mut PathBuf, show_hidden:
             }
         });
     });
+
+    needs_refresh
 }
