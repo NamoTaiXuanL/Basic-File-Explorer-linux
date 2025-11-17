@@ -2,11 +2,14 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::fs;
 use crate::utils;
+use image::GenericImageView;
 
 pub struct Preview {
     current_file: Option<PathBuf>,
     preview_content: String,
     file_info: FileInfo,
+    image_texture: Option<egui::TextureHandle>,
+    image_size: Option<(u32, u32)>,
 }
 
 #[derive(Default)]
@@ -22,6 +25,8 @@ impl Preview {
             current_file: None,
             preview_content: String::new(),
             file_info: FileInfo::default(),
+            image_texture: None,
+            image_size: None,
         }
     }
 
@@ -29,15 +34,19 @@ impl Preview {
         self.current_file = None;
         self.preview_content.clear();
         self.file_info = FileInfo::default();
+        self.image_texture = None;
+        self.image_size = None;
     }
 
-    pub fn load_preview(&mut self, path: PathBuf) {
+    pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
         if self.current_file.as_ref() == Some(&path) {
             return;
         }
 
         self.current_file = Some(path.clone());
         self.preview_content.clear();
+        self.image_texture = None;
+        self.image_size = None;
 
         // 获取文件信息
         if let Ok(metadata) = fs::metadata(&path) {
@@ -49,7 +58,7 @@ impl Preview {
         self.file_info.file_type = self.get_file_type(&path);
 
         // 生成预览内容
-        self.generate_preview(&path);
+        self.generate_preview(&path, ctx);
     }
 
     fn get_file_type(&self, path: &Path) -> String {
@@ -63,7 +72,7 @@ impl Preview {
         }
     }
 
-    fn generate_preview(&mut self, path: &Path) {
+    fn generate_preview(&mut self, path: &Path, ctx: &egui::Context) {
         if path.is_dir() {
             self.generate_folder_preview(path);
         } else {
@@ -73,7 +82,7 @@ impl Preview {
                     self.generate_text_preview(path);
                 }
                 Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => {
-                    self.preview_content = "图片文件预览暂未实现".to_string();
+                    self.generate_image_preview(path, ctx);
                 }
                 _ => {
                     self.preview_content = "此文件类型不支持预览".to_string();
@@ -142,6 +151,45 @@ impl Preview {
         }
     }
 
+    fn generate_image_preview(&mut self, path: &Path, ctx: &egui::Context) {
+        match image::open(path) {
+            Ok(img) => {
+                let (width, height) = img.dimensions();
+                self.image_size = Some((width, height));
+
+                // 将图片转换为RGBA格式
+                let img_rgba = img.to_rgba8();
+                let size = [img_rgba.width() as usize, img_rgba.height() as usize];
+
+                // 创建颜色图像
+                let image_data = egui::ColorImage::from_rgba_unmultiplied(size, &img_rgba);
+
+                // 加载纹理
+                self.image_texture = Some(ctx.load_texture(
+                    format!("image_{:?}", path),
+                    image_data,
+                    egui::TextureOptions::default(),
+                ));
+
+                self.preview_content = format!(
+                    "图片预览\n\n尺寸: {} x {} 像素\n格式: {}\n色彩模式: {:?}",
+                    width,
+                    height,
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext.to_uppercase())
+                        .unwrap_or_else(|| "未知".to_string()),
+                    img.color()
+                );
+            }
+            Err(e) => {
+                self.preview_content = format!("无法加载图片: {}", e);
+                self.image_texture = None;
+                self.image_size = None;
+            }
+        }
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui) {
         if let Some(path) = &self.current_file {
             ui.vertical(|ui| {
@@ -159,7 +207,35 @@ impl Preview {
                 ui.separator();
 
                 // 预览内容
-                if !self.preview_content.is_empty() {
+                if let Some(texture) = &self.image_texture {
+                    // 显示图片
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label("图片预览:");
+
+                            // 限制最大显示尺寸
+                            let max_size = ui.available_size() - egui::vec2(20.0, 20.0);
+                            let mut image_size = egui::vec2(texture.size()[0] as f32, texture.size()[1] as f32);
+
+                            // 缩放图片以适应可用空间
+                            let scale = (max_size.x / image_size.x).min(max_size.y / image_size.y).min(1.0);
+                            image_size *= scale;
+
+                            ui.add(
+                                egui::Image::from_texture(egui::load::SizedTexture::new(
+                                    texture.id(),
+                                    image_size,
+                                ))
+                            );
+
+                            // 显示图片信息
+                            if let Some((width, height)) = self.image_size {
+                                ui.label(format!("实际尺寸: {} x {} 像素", width, height));
+                                ui.label(format!("显示尺寸: {:.0} x {:.0} 像素", image_size.x, image_size.y));
+                            }
+                        });
+                    });
+                } else if !self.preview_content.is_empty() {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.monospace(&self.preview_content);
                     });

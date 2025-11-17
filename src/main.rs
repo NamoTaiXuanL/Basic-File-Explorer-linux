@@ -185,9 +185,9 @@ impl FileExplorerApp {
         }
     }
 
-    fn select_file(&mut self, file: PathBuf) {
+    fn select_file(&mut self, file: PathBuf, ctx: &egui::Context) {
         self.selected_file = Some(file.clone());
-        self.preview.load_preview(file);
+        self.preview.load_preview(file, ctx);
     }
 
     fn push_history(&mut self, path: PathBuf) {
@@ -545,7 +545,7 @@ impl eframe::App for FileExplorerApp {
                             // 右侧标题由贯穿式标题栏提供
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 if let Some(selected_file) = &self.selected_file {
-                                    self.preview.load_preview(selected_file.clone());
+                                    self.preview.load_preview(selected_file.clone(), ctx);
                                 }
                                 self.preview.show(ui);
                             });
