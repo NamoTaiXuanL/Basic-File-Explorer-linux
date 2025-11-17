@@ -332,7 +332,7 @@ impl eframe::App for FileExplorerApp {
                 ui.separator();
 
                 // 工具栏
-                let (toolbar_needs_refresh, toolbar_should_create_folder) = toolbar::show_toolbar(ui, &mut self.current_path);
+                let (toolbar_needs_refresh, toolbar_should_create_folder) = toolbar::show_toolbar(ui, &mut self.current_path, &mut self.view_mode);
                 if toolbar_needs_refresh {
                     // 工具栏只影响内容框，不影响目录框
                     self.refresh_file_list();

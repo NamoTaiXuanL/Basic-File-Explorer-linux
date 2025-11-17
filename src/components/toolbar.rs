@@ -1,9 +1,9 @@
 use eframe::egui;
 use std::path::PathBuf;
 use dirs;
-use super::create_operations::{CreateOperations, CreateOperationResult};
+use super::file_list::ViewMode;
 
-pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> (bool, bool) {
+pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf, view_mode: &mut ViewMode) -> (bool, bool) {
     let mut needs_refresh = false;
     let mut should_create_folder = false;
 
@@ -54,16 +54,16 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf) -> (bool, boo
 
         ui.add_space(10.0);
 
-        // 视图切换（与新建/刷新一致的small按钮样式与高度）
+        // 视图切换按钮（与新建/刷新一致的small按钮样式与高度）
         ui.label("视图:");
-        if ui.add(egui::Button::new("列表").small()).clicked() {
-            // TODO: 切换到列表视图
+        if ui.add(egui::Button::new("大图标").small()).clicked() {
+            *view_mode = ViewMode::LargeIcons;
         }
-        if ui.add(egui::Button::new("图标").small()).clicked() {
-            // TODO: 切换到图标视图
+        if ui.add(egui::Button::new("小图标").small()).clicked() {
+            *view_mode = ViewMode::SmallIcons;
         }
         if ui.add(egui::Button::new("详情").small()).clicked() {
-            // TODO: 切换到详情视图
+            *view_mode = ViewMode::Details;
         }
 
         // 右侧对齐剩余空间
