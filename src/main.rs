@@ -90,6 +90,7 @@ struct FileExplorerApp {
     file_operations: FileOperations,
     create_operations: CreateOperations,
     help_system: HelpSystem,
+    drive_bar: DriveBar,  // 新增盘符栏
     show_hidden: bool,
     nav_history: Vec<PathBuf>,
     history_pos: usize,
@@ -130,6 +131,7 @@ impl FileExplorerApp {
             file_operations: FileOperations::new(),
             create_operations: CreateOperations::new(),
             help_system: HelpSystem::new(),
+            drive_bar: DriveBar::new(),
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
@@ -287,6 +289,15 @@ impl eframe::App for FileExplorerApp {
                 if menu_should_create_folder {
                     self.new_folder_name = generate_default_folder_name(&self.current_path);
                     self.show_new_folder_dialog = true;
+                }
+
+                ui.separator();
+
+                // 盘符栏
+                let drive_bar_needs_refresh = self.drive_bar.show(ui, &mut self.current_path);
+                if drive_bar_needs_refresh {
+                    self.refresh_file_list();
+                    self.push_history(self.current_path.clone());
                 }
 
                 ui.separator();

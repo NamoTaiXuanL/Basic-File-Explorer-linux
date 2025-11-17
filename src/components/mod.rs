@@ -8,6 +8,7 @@ pub mod create_operations;
 pub mod help;
 pub mod icon_manager;
 pub mod app_icon;
+pub mod drive_bar;
 
 pub use file_list::*;
 pub use preview::*;
@@ -18,3 +19,4 @@ pub use file_operations::*;
 pub use create_operations::*;
 pub use help::*;
 pub use icon_manager::*;
+pub use drive_bar::*;
