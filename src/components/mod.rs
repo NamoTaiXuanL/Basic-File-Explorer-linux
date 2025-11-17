@@ -7,6 +7,7 @@ pub mod file_operations;
 pub mod create_operations;
 pub mod help;
 pub mod icon_manager;
+pub mod app_icon;
 
 pub use file_list::*;
 pub use preview::*;

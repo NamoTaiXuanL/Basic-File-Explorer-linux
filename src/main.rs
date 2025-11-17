@@ -4,15 +4,26 @@ use std::fs;
 
 mod components;
 use components::*;
+use components::app_icon::*;
 
 mod utils;
 use utils::*;
 
 fn main() -> Result<(), eframe::Error> {
+    // 加载应用程序图标
+    let icon_data = load_app_icon();
+
+    let mut viewport_builder = egui::ViewportBuilder::default()
+        .with_inner_size([1400.0, 900.0])
+        .with_resizable(true);
+
+    // 如果图标加载成功，设置窗口图标
+    if let Some(icon) = icon_data {
+        viewport_builder = viewport_builder.with_icon(icon);
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 900.0])
-            .with_resizable(true),
+        viewport: viewport_builder,
         ..Default::default()
     };
 
