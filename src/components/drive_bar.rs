@@ -216,26 +216,19 @@ impl DriveBar {
                     .to_string_lossy()
                     .into_owned();
 
+                // 清理标签中的空字符
+                let cleaned_label = label.trim_matches('\0').trim().to_string();
+
                 // 如果获取到真实标签且不为空，使用真实标签
-                if !label.trim().is_empty() {
-                    label
+                if !cleaned_label.is_empty() {
+                    cleaned_label
                 } else {
-                    // 如果没有标签，使用默认格式
-                    let drive_letter = drive_path.to_string_lossy();
-                    if drive_letter.len() >= 1 {
-                        format!("本地磁盘 ({})", drive_letter.chars().next().unwrap())
-                    } else {
-                        "本地磁盘".to_string()
-                    }
-                }
-            } else {
-                // 获取失败，使用默认格式
-                let drive_letter = drive_path.to_string_lossy();
-                if drive_letter.len() >= 1 {
-                    format!("本地磁盘 ({})", drive_letter.chars().next().unwrap())
-                } else {
+                    // 如果没有标签，返回"本地磁盘"作为标签
                     "本地磁盘".to_string()
                 }
+            } else {
+                // 获取失败，返回"本地磁盘"作为标签
+                "本地磁盘".to_string()
             }
         }
     }
@@ -262,7 +255,7 @@ impl DriveBar {
             ui.separator();
 
             for drive in &self.drives {
-                let drive_text = format!("{} ({})", drive.letter, drive.label);
+                let drive_text = format!("{}: ({})", drive.letter, drive.label);
                 let button = egui::Button::new(drive_text)
                     .min_size(egui::vec2(100.0, 24.0));
 
