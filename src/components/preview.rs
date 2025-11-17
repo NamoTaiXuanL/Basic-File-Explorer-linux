@@ -1,6 +1,7 @@
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::collections::HashMap;
 use crate::utils;
 use image::GenericImageView;
 
@@ -10,6 +11,18 @@ pub struct Preview {
     file_info: FileInfo,
     image_texture: Option<egui::TextureHandle>,
     image_size: Option<(u32, u32)>,
+    // 图片缓存
+    texture_cache: HashMap<String, CachedImage>,
+    // 性能优化：加载状态
+    is_loading: bool,
+    pending_file: Option<PathBuf>,
+}
+
+struct CachedImage {
+    texture: egui::TextureHandle,
+    size: (u32, u32),
+    file_size: u64,
+    last_modified: std::time::SystemTime,
 }
 
 #[derive(Default)]
@@ -27,6 +40,9 @@ impl Preview {
             file_info: FileInfo::default(),
             image_texture: None,
             image_size: None,
+            texture_cache: HashMap::new(),
+            is_loading: false,
+            pending_file: None,
         }
     }
 
@@ -36,17 +52,38 @@ impl Preview {
         self.file_info = FileInfo::default();
         self.image_texture = None;
         self.image_size = None;
+        self.is_loading = false;
+        self.pending_file = None;
+        // 清理缓存但保留最近的几个以提高性能
+        self.cleanup_cache();
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
-        if self.current_file.as_ref() == Some(&path) {
+        if self.current_file.as_ref() == Some(&path) && !self.is_loading {
+            return;
+        }
+
+        // 如果当前正在加载其他文件，取消并加载新的
+        if self.is_loading {
+            self.pending_file = Some(path.clone());
             return;
         }
 
         self.current_file = Some(path.clone());
         self.preview_content.clear();
-        self.image_texture = None;
-        self.image_size = None;
+
+        // 先检查缓存，如果有就直接显示
+        let cache_key = self.get_cache_key(&path);
+        if self.texture_cache.contains_key(&cache_key) {
+            // 有缓存，直接显示
+            self.is_loading = false;
+        } else {
+            // 没有缓存，显示加载状态
+            self.is_loading = true;
+            self.image_texture = None;
+            self.image_size = None;
+            self.preview_content = "正在加载图片...".to_string();
+        }
 
         // 获取文件信息
         if let Ok(metadata) = fs::metadata(&path) {
@@ -57,8 +94,25 @@ impl Preview {
 
         self.file_info.file_type = self.get_file_type(&path);
 
-        // 生成预览内容
+        // 异步生成预览内容
         self.generate_preview(&path, ctx);
+    }
+
+    // 在每帧更新时调用，用于处理延迟加载
+    pub fn update(&mut self, ctx: &egui::Context) {
+        if self.is_loading {
+            if let Some(current_file) = self.current_file.clone() {
+                // 这里可以添加更复杂的加载逻辑
+                // 目前为了简化，直接同步加载但加上状态管理
+                self.generate_preview(&current_file, ctx);
+                self.is_loading = false;
+
+                // 检查是否有待处理的文件
+                if let Some(pending) = self.pending_file.take() {
+                    self.load_preview(pending, ctx);
+                }
+            }
+        }
     }
 
     fn get_file_type(&self, path: &Path) -> String {
@@ -152,6 +206,22 @@ impl Preview {
     }
 
     fn generate_image_preview(&mut self, path: &Path, ctx: &egui::Context) {
+        // 首先检查缓存
+        if let Some((texture, size)) = self.get_cached_image(path) {
+            self.image_texture = Some(texture);
+            self.image_size = Some(size);
+            self.preview_content = format!(
+                "图片预览 (已缓存)\n\n尺寸: {} x {} 像素\n格式: {}",
+                size.0,
+                size.1,
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_uppercase())
+                    .unwrap_or_else(|| "未知".to_string())
+            );
+            return;
+        }
+
         // 首先检查文件是否存在
         if !path.exists() {
             self.preview_content = "文件不存在".to_string();
@@ -203,11 +273,16 @@ impl Preview {
                 let image_data = egui::ColorImage::from_rgba_unmultiplied(size, &img_rgba);
 
                 // 加载纹理
-                self.image_texture = Some(ctx.load_texture(
-                    format!("image_{}", path.display()),
+                let texture = ctx.load_texture(
+                    format!("cached_image_{}", path.display()),
                     image_data,
                     egui::TextureOptions::default(),
-                ));
+                );
+
+                self.image_texture = Some(texture.clone());
+
+                // 缓存图片
+                self.cache_image(path, texture, (width, height));
 
                 self.preview_content = format!(
                     "图片预览\n\n尺寸: {} x {} 像素\n格式: {}\n色彩模式: {:?}",
@@ -297,6 +372,61 @@ impl Preview {
             });
         } else {
             ui.label("选择一个文件查看预览");
+        }
+    }
+
+    // 缓存管理方法
+    fn get_cache_key(&self, path: &Path) -> String {
+        let modified_time = path.metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        format!("{}_{:?}", path.to_string_lossy(), modified_time)
+    }
+
+    fn is_cache_valid(&self, path: &Path, cached: &CachedImage) -> bool {
+        if let Ok(metadata) = path.metadata() {
+            if let Ok(modified) = metadata.modified() {
+                return cached.file_size == metadata.len() && cached.last_modified == modified;
+            }
+        }
+        false
+    }
+
+    fn cleanup_cache(&mut self) {
+        // 保留最近10个图片的缓存，删除其他
+        if self.texture_cache.len() > 10 {
+            let mut keys: Vec<_> = self.texture_cache.keys().cloned().collect();
+            keys.sort(); // 简单的字符串排序，实际项目中可能需要更复杂的策略
+
+            for key in keys.iter().take(self.texture_cache.len() - 10) {
+                self.texture_cache.remove(key);
+            }
+        }
+    }
+
+    fn get_cached_image(&self, path: &Path) -> Option<(egui::TextureHandle, (u32, u32))> {
+        let cache_key = self.get_cache_key(path);
+        if let Some(cached) = self.texture_cache.get(&cache_key) {
+            if self.is_cache_valid(path, cached) {
+                return Some((cached.texture.clone(), cached.size));
+            }
+        }
+        None
+    }
+
+    fn cache_image(&mut self, path: &Path, texture: egui::TextureHandle, size: (u32, u32)) {
+        let cache_key = self.get_cache_key(path);
+        if let Ok(metadata) = path.metadata() {
+            if let Ok(modified) = metadata.modified() {
+                let cached = CachedImage {
+                    texture,
+                    size,
+                    file_size: metadata.len(),
+                    last_modified: modified,
+                };
+                self.texture_cache.insert(cache_key, cached);
+                self.cleanup_cache();
+            }
         }
     }
 }

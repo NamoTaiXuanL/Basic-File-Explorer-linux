@@ -547,6 +547,7 @@ impl eframe::App for FileExplorerApp {
                                 if let Some(selected_file) = &self.selected_file {
                                     self.preview.load_preview(selected_file.clone(), ctx);
                                 }
+                                self.preview.update(ctx);
                                 self.preview.show(ui);
                             });
                         }
