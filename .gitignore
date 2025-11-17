@@ -54,6 +54,7 @@ config_local.json
 .env
 .env.local
 config.json
+*.json
 # 忽略IDE和编辑器文件
 .vscode/
 .idea/
@@ -84,3 +85,4 @@ logs/
 *.7z
 config.json
 nul
+

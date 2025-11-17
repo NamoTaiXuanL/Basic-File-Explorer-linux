@@ -12,6 +12,14 @@ pub struct DriveInfo {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceState {
+    pub current_path: PathBuf,      // 内容框的当前路径
+    pub directory_path: PathBuf,     // 目录框的当前路径
+    pub nav_history: Vec<PathBuf>,   // 导航历史
+    pub history_pos: usize,          // 历史位置
+}
+
 // 用于PathBuf序列化的辅助模块
 mod serde_path {
     use std::path::PathBuf;
@@ -40,26 +48,43 @@ struct CacheData {
     timestamp: u64,
 }
 
+#[derive(Serialize, Deserialize)]
+struct WorkspaceCacheData {
+    workspaces: Vec<(char, WorkspaceState)>,
+    timestamp: u64,
+}
+
 pub struct DriveBar {
     drives: Vec<DriveInfo>,
+    workspaces: std::collections::HashMap<char, WorkspaceState>,
     cache_file: String,
+    workspace_cache_file: String,
 }
 
 impl DriveBar {
     const CACHE_EXPIRE_SECONDS: u64 = 3600; // 缓存1小时过期
-}
 
-impl DriveBar {
-    pub fn new() -> Self {
+    pub fn new(initial_path: &PathBuf) -> Self {
         let cache_file = "drives_cache.json".to_string();
+        let workspace_cache_file = "workspaces_cache.json".to_string();
         let mut drive_bar = Self {
             drives: Vec::new(),
+            workspaces: std::collections::HashMap::new(),
             cache_file,
+            workspace_cache_file,
         };
 
         // 尝试加载缓存，如果失败则刷新
         if !drive_bar.load_from_cache() {
             drive_bar.refresh_drives();
+        }
+
+        // 加载工作区状态
+        drive_bar.load_workspaces_from_cache();
+
+        // 为当前路径初始化工作区
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(initial_path) {
+            drive_bar.ensure_workspace_exists(drive_letter, initial_path);
         }
 
         drive_bar
@@ -160,7 +185,10 @@ impl DriveBar {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
-        let mut needs_refresh = false;
+        let mut workspace_switched = false;
+
+        // 先收集需要切换的盘符
+        let mut clicked_drive = None;
 
         // 显示盘符按钮栏
         ui.horizontal(|ui| {
@@ -179,8 +207,7 @@ impl DriveBar {
                 let response = ui.add(button);
 
                 if response.clicked() {
-                    *current_path = drive.path.clone();
-                    needs_refresh = true;
+                    clicked_drive = Some(drive.letter);
                 }
 
                 // 显示工具提示
@@ -190,6 +217,127 @@ impl DriveBar {
             }
         });
 
-        needs_refresh
+        // 在循环外执行工作区切换
+        if let Some(drive_letter) = clicked_drive {
+            workspace_switched = self.switch_to_workspace(drive_letter, current_path);
+        }
+
+        workspace_switched
+    }
+
+    // 保存当前工作区状态
+    pub fn save_workspace_state(&mut self, current_path: &PathBuf, directory_path: &PathBuf,
+                               nav_history: &[PathBuf], history_pos: usize) {
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(current_path) {
+            let workspace = WorkspaceState {
+                current_path: current_path.clone(),
+                directory_path: directory_path.clone(),
+                nav_history: nav_history.to_vec(),
+                history_pos,
+            };
+
+            self.workspaces.insert(drive_letter, workspace);
+            self.save_workspaces_to_cache();
+        }
+    }
+
+    // 切换到指定盘符的工作区
+    fn switch_to_workspace(&mut self, drive_letter: char, current_path: &mut PathBuf) -> bool {
+        // 先保存当前工作区状态（由调用者负责）
+
+        // 切换到目标工作区
+        if let Some(workspace) = self.workspaces.get(&drive_letter) {
+            *current_path = workspace.current_path.clone();
+            true
+        } else {
+            // 创建新的工作区
+            let drive_path = PathBuf::from(format!("{}:/", drive_letter));
+            let workspace = WorkspaceState {
+                current_path: drive_path.clone(),
+                directory_path: drive_path.clone(),
+                nav_history: vec![drive_path.clone()],
+                history_pos: 0,
+            };
+
+            *current_path = drive_path.clone();
+            self.workspaces.insert(drive_letter, workspace);
+            true
+        }
+    }
+
+    // 获取当前工作区状态
+    pub fn get_current_workspace(&self, current_path: &PathBuf) -> Option<&WorkspaceState> {
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(current_path) {
+            self.workspaces.get(&drive_letter)
+        } else {
+            None
+        }
+    }
+
+    // 确保工作区存在
+    fn ensure_workspace_exists(&mut self, drive_letter: char, initial_path: &PathBuf) {
+        if !self.workspaces.contains_key(&drive_letter) {
+            let workspace = WorkspaceState {
+                current_path: initial_path.clone(),
+                directory_path: initial_path.parent()
+                    .unwrap_or(initial_path)
+                    .to_path_buf(),
+                nav_history: vec![initial_path.clone()],
+                history_pos: 0,
+            };
+            self.workspaces.insert(drive_letter, workspace);
+        }
+    }
+
+    // 从路径获取盘符
+    fn get_drive_letter_from_path(path: &PathBuf) -> Option<char> {
+        if let Some(path_str) = path.to_str() {
+            if path_str.len() >= 2 && path_str.chars().nth(1) == Some(':') {
+                path_str.chars().next()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    // 加载工作区缓存
+    fn load_workspaces_from_cache(&mut self) {
+        if let Ok(content) = fs::read_to_string(&self.workspace_cache_file) {
+            if let Ok(cache_data) = serde_json::from_str::<WorkspaceCacheData>(&content) {
+                // 检查缓存是否过期（工作区缓存保留24小时）
+                let current_time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                if current_time - cache_data.timestamp < 86400 { // 24小时
+                    self.workspaces = cache_data.workspaces.into_iter().collect();
+                }
+            }
+        }
+    }
+
+    // 保存工作区缓存
+    fn save_workspaces_to_cache(&self) {
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let workspaces_vec: Vec<(char, WorkspaceState)> = self.workspaces
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        let cache_data = WorkspaceCacheData {
+            workspaces: workspaces_vec,
+            timestamp: current_time,
+        };
+
+        if let Ok(content) = serde_json::to_string_pretty(&cache_data) {
+            let _ = fs::write(&self.workspace_cache_file, content);
+        }
     }
 }

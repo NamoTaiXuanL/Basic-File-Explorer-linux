@@ -131,7 +131,7 @@ impl FileExplorerApp {
             file_operations: FileOperations::new(),
             create_operations: CreateOperations::new(),
             help_system: HelpSystem::new(),
-            drive_bar: DriveBar::new(),
+            drive_bar: DriveBar::new(&current_path),
             show_hidden: false,
             nav_history: vec![current_path.clone()],
             history_pos: 0,
@@ -159,11 +159,15 @@ impl FileExplorerApp {
     fn refresh_file_list(&mut self) {
         // 只刷新内容框
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
+        // 保存工作区状态
+        self.save_current_workspace_state();
     }
 
     fn refresh_directory_list(&mut self) {
         // 只刷新目录框
         self.directory_list.refresh(self.directory_current_path.clone(), self.show_hidden);
+        // 保存工作区状态
+        self.save_current_workspace_state();
     }
 
     fn navigate_directory_to(&mut self, path: PathBuf) {
@@ -213,6 +217,15 @@ impl FileExplorerApp {
             self.current_path = path;
             self.refresh_file_list();
         }
+    }
+
+    fn save_current_workspace_state(&mut self) {
+        self.drive_bar.save_workspace_state(
+            &self.current_path,
+            &self.directory_current_path,
+            &self.nav_history,
+            self.history_pos
+        );
     }
 }
 
@@ -293,11 +306,27 @@ impl eframe::App for FileExplorerApp {
 
                 ui.separator();
 
-                // 盘符栏
-                let drive_bar_needs_refresh = self.drive_bar.show(ui, &mut self.current_path);
-                if drive_bar_needs_refresh {
-                    self.refresh_file_list();
-                    self.push_history(self.current_path.clone());
+                // 盘符栏 - 先保存当前工作区状态
+                self.drive_bar.save_workspace_state(
+                    &self.current_path,
+                    &self.directory_current_path,
+                    &self.nav_history,
+                    self.history_pos
+                );
+
+                let workspace_switched = self.drive_bar.show(ui, &mut self.current_path);
+                if workspace_switched {
+                    // 工作区切换，恢复新工作区的状态
+                    if let Some(workspace) = self.drive_bar.get_current_workspace(&self.current_path) {
+                        self.current_path = workspace.current_path.clone();
+                        self.directory_current_path = workspace.directory_path.clone();
+                        self.nav_history = workspace.nav_history.clone();
+                        self.history_pos = workspace.history_pos;
+
+                        // 刷新两个列表
+                        self.refresh_file_list();
+                        self.refresh_directory_list();
+                    }
                 }
 
                 ui.separator();
