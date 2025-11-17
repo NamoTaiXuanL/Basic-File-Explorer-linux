@@ -83,3 +83,4 @@ logs/
 *.rar
 *.7z
 config.json
+nul

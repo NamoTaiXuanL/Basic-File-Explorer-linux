@@ -164,11 +164,10 @@ impl DriveBar {
 
         // 显示盘符按钮栏
         ui.horizontal(|ui| {
-            // 设置标签与按钮高度对齐
-            ui.add_sized(
-                egui::vec2(40.0, 24.0),
-                egui::Label::new("盘符:")
-            );
+            // 盘符标签也用按钮显示，保持对齐一致
+            let label_button = egui::Button::new("盘符:")
+                .min_size(egui::vec2(60.0, 24.0));
+            ui.add(label_button);
 
             ui.separator();
 
