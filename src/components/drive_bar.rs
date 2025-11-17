@@ -153,9 +153,10 @@ impl DriveBar {
             for letter in b'A'..=b'Z' {
                 let drive_path = PathBuf::from(format!("{}:/", char::from(letter)));
                 if drive_path.exists() {
+                    let real_label = Self::get_drive_volume_label(&drive_path);
                     let drive_info = DriveInfo {
                         letter: char::from(letter),
-                        label: format!("本地磁盘 ({})", char::from(letter)),
+                        label: real_label,
                         path: drive_path,
                     };
                     drives.push(drive_info);
@@ -182,6 +183,67 @@ impl DriveBar {
         }
 
         drives
+    }
+
+    // 获取磁盘的真实卷标
+    #[cfg(target_os = "windows")]
+    fn get_drive_volume_label(drive_path: &PathBuf) -> String {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        use winapi::um::fileapi::{GetVolumeInformationW};
+        use std::ptr;
+
+        let path_str = format!("{}\\", drive_path.to_string_lossy());
+        let mut wide_path: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let mut volume_name_buffer = [0u16; 256];
+        let mut file_system_name_buffer = [0u16; 256];
+
+        unsafe {
+            let result = GetVolumeInformationW(
+                wide_path.as_ptr(),
+                volume_name_buffer.as_mut_ptr(),
+                volume_name_buffer.len() as u32,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                file_system_name_buffer.as_mut_ptr(),
+                file_system_name_buffer.len() as u32,
+            );
+
+            if result != 0 {
+                let label = OsString::from_wide(&volume_name_buffer[..])
+                    .to_string_lossy()
+                    .into_owned();
+
+                // 如果获取到真实标签且不为空，使用真实标签
+                if !label.trim().is_empty() {
+                    label
+                } else {
+                    // 如果没有标签，使用默认格式
+                    let drive_letter = drive_path.to_string_lossy();
+                    if drive_letter.len() >= 1 {
+                        format!("本地磁盘 ({})", drive_letter.chars().next().unwrap())
+                    } else {
+                        "本地磁盘".to_string()
+                    }
+                }
+            } else {
+                // 获取失败，使用默认格式
+                let drive_letter = drive_path.to_string_lossy();
+                if drive_letter.len() >= 1 {
+                    format!("本地磁盘 ({})", drive_letter.chars().next().unwrap())
+                } else {
+                    "本地磁盘".to_string()
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn get_drive_volume_label(_drive_path: &PathBuf) -> String {
+        // Linux/Unix系统直接返回路径作为标签
+        _drive_path.to_string_lossy().into_owned()
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
