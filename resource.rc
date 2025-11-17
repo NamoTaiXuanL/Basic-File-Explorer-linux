@@ -1,0 +1,4 @@
+#include <windows.h>
+
+// 应用程序图标
+IDI_APP_ICON ICON "material/png/logo_icon_0_150.ico"

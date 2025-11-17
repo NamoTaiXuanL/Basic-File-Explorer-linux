@@ -78,7 +78,7 @@ logs/
 *.sqlite3
 
 # 忽略压缩文件
-*.zip
+#*.zip
 *.tar.gz
 *.rar
 *.7z
