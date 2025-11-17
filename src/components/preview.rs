@@ -2,6 +2,8 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use crate::utils;
 use image::GenericImageView;
 
@@ -16,6 +18,15 @@ pub struct Preview {
     // 性能优化：加载状态
     is_loading: bool,
     pending_file: Option<PathBuf>,
+    // 异步加载
+    loading_result: Option<Arc<Mutex<Option<LoadingResult>>>>,
+}
+
+struct LoadingResult {
+    image_data: Option<egui::ColorImage>,
+    size: Option<(u32, u32)>,
+    error: Option<String>,
+    file_path: PathBuf,
 }
 
 struct CachedImage {
@@ -43,6 +54,7 @@ impl Preview {
             texture_cache: HashMap::new(),
             is_loading: false,
             pending_file: None,
+            loading_result: None,
         }
     }
 
@@ -54,6 +66,7 @@ impl Preview {
         self.image_size = None;
         self.is_loading = false;
         self.pending_file = None;
+        self.loading_result = None;
         // 清理缓存但保留最近的几个以提高性能
         self.cleanup_cache();
     }
@@ -73,17 +86,30 @@ impl Preview {
         self.preview_content.clear();
 
         // 先检查缓存，如果有就直接显示
-        let cache_key = self.get_cache_key(&path);
-        if self.texture_cache.contains_key(&cache_key) {
-            // 有缓存，直接显示
+        if let Some((texture, size)) = self.get_cached_image(&path) {
+            self.image_texture = Some(texture);
+            self.image_size = Some(size);
+            self.preview_content = format!(
+                "图片预览 (已缓存)\n\n尺寸: {} x {} 像素\n格式: {}",
+                size.0,
+                size.1,
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_uppercase())
+                    .unwrap_or_else(|| "未知".to_string())
+            );
             self.is_loading = false;
-        } else {
-            // 没有缓存，显示加载状态
-            self.is_loading = true;
-            self.image_texture = None;
-            self.image_size = None;
-            self.preview_content = "正在加载图片...".to_string();
+            return;
         }
+
+        // 没有缓存，启动异步加载
+        self.is_loading = true;
+        self.image_texture = None;
+        self.image_size = None;
+        self.preview_content = "正在加载图片...".to_string();
+
+        // 启动异步加载线程
+        self.start_async_loading(path.clone(), ctx.clone());
 
         // 获取文件信息
         if let Ok(metadata) = fs::metadata(&path) {
@@ -93,24 +119,78 @@ impl Preview {
         }
 
         self.file_info.file_type = self.get_file_type(&path);
-
-        // 异步生成预览内容
-        self.generate_preview(&path, ctx);
     }
 
-    // 在每帧更新时调用，用于处理延迟加载
+    // 在每帧更新时调用，用于处理异步加载结果
     pub fn update(&mut self, ctx: &egui::Context) {
-        if self.is_loading {
-            if let Some(current_file) = self.current_file.clone() {
-                // 这里可以添加更复杂的加载逻辑
-                // 目前为了简化，直接同步加载但加上状态管理
-                self.generate_preview(&current_file, ctx);
-                self.is_loading = false;
+        // 先获取需要的信息，避免借用冲突
+        let (should_process, current_file, image_data, size, error) = {
+            let mut found = false;
+            let mut cur_file = PathBuf::new();
+            let mut img_data = None;
+            let mut img_size = None;
+            let mut img_error = None;
 
-                // 检查是否有待处理的文件
-                if let Some(pending) = self.pending_file.take() {
-                    self.load_preview(pending, ctx);
+            if self.is_loading {
+                if let Some(loading_result) = &self.loading_result {
+                    if let Ok(result_guard) = loading_result.lock() {
+                        if let Some(result) = result_guard.as_ref() {
+                            // 检查结果是否对应当前文件
+                            if let Some(current_file) = &self.current_file {
+                                if result.file_path == *current_file {
+                                    found = true;
+                                    cur_file = current_file.clone();
+                                    img_data = result.image_data.clone();
+                                    img_size = result.size;
+                                    img_error = result.error.clone();
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            (found, cur_file, img_data, img_size, img_error)
+        };
+
+        // 处理结果
+        if should_process {
+            if let Some(image_data) = image_data {
+                if let Some(size) = size {
+                    // 创建纹理
+                    let texture = ctx.load_texture(
+                        format!("async_image_{}", current_file.display()),
+                        image_data,
+                        egui::TextureOptions::default(),
+                    );
+
+                    self.image_texture = Some(texture);
+                    self.image_size = Some(size);
+
+                    self.preview_content = format!(
+                        "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
+                        size.0,
+                        size.1,
+                        current_file.extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.to_uppercase())
+                            .unwrap_or_else(|| "未知".to_string())
+                    );
+                }
+            } else if let Some(error) = error {
+                self.preview_content = format!("无法加载图片: {}", error);
+                self.image_texture = None;
+                self.image_size = None;
+            }
+
+            self.is_loading = false;
+            self.loading_result = None; // 清除结果
+        }
+
+        // 检查是否有待处理的文件
+        if !self.is_loading {
+            if let Some(pending) = self.pending_file.take() {
+                self.load_preview(pending, ctx);
             }
         }
     }
@@ -136,7 +216,7 @@ impl Preview {
                     self.generate_text_preview(path);
                 }
                 Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => {
-                    self.generate_image_preview(path, ctx);
+                    self.generate_preview(path, ctx);
                 }
                 _ => {
                     self.preview_content = "此文件类型不支持预览".to_string();
@@ -205,104 +285,7 @@ impl Preview {
         }
     }
 
-    fn generate_image_preview(&mut self, path: &Path, ctx: &egui::Context) {
-        // 首先检查缓存
-        if let Some((texture, size)) = self.get_cached_image(path) {
-            self.image_texture = Some(texture);
-            self.image_size = Some(size);
-            self.preview_content = format!(
-                "图片预览 (已缓存)\n\n尺寸: {} x {} 像素\n格式: {}",
-                size.0,
-                size.1,
-                path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.to_uppercase())
-                    .unwrap_or_else(|| "未知".to_string())
-            );
-            return;
-        }
-
-        // 首先检查文件是否存在
-        if !path.exists() {
-            self.preview_content = "文件不存在".to_string();
-            self.image_texture = None;
-            self.image_size = None;
-            return;
-        }
-
-        // 检查文件大小，避免加载过大的图片
-        if let Ok(metadata) = fs::metadata(path) {
-            let file_size_bytes = metadata.len();
-            // 限制图片大小为50MB
-            if file_size_bytes > 50 * 1024 * 1024 {
-                self.preview_content = format!("图片文件过大 ({} MB)，无法预览", file_size_bytes / (1024 * 1024));
-                self.image_texture = None;
-                self.image_size = None;
-                return;
-            }
-        }
-
-        // 尝试加载图片
-        match image::open(path) {
-            Ok(img) => {
-                let (width, height) = img.dimensions();
-                self.image_size = Some((width, height));
-
-                // 检查图片尺寸是否过大
-                if width > 8192 || height > 8192 {
-                    self.preview_content = format!("图片尺寸过大 ({} x {})，无法预览", width, height);
-                    self.image_texture = None;
-                    self.image_size = None;
-                    return;
-                }
-
-                // 将图片转换为RGBA格式
-                let img_rgba = img.to_rgba8();
-                let size = [img_rgba.width() as usize, img_rgba.height() as usize];
-
-                // 检查图片数据大小
-                let expected_size = size[0] * size[1] * 4; // RGBA = 4 bytes per pixel
-                if expected_size > 100 * 1024 * 1024 { // 100MB limit for pixel data
-                    self.preview_content = format!("图片数据量过大，无法预览");
-                    self.image_texture = None;
-                    self.image_size = None;
-                    return;
-                }
-
-                // 创建颜色图像
-                let image_data = egui::ColorImage::from_rgba_unmultiplied(size, &img_rgba);
-
-                // 加载纹理
-                let texture = ctx.load_texture(
-                    format!("cached_image_{}", path.display()),
-                    image_data,
-                    egui::TextureOptions::default(),
-                );
-
-                self.image_texture = Some(texture.clone());
-
-                // 缓存图片
-                self.cache_image(path, texture, (width, height));
-
-                self.preview_content = format!(
-                    "图片预览\n\n尺寸: {} x {} 像素\n格式: {}\n色彩模式: {:?}",
-                    width,
-                    height,
-                    path.extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.to_uppercase())
-                        .unwrap_or_else(|| "未知".to_string()),
-                    img.color()
-                );
-            }
-            Err(e) => {
-                self.preview_content = format!("无法加载图片: {}\n请检查文件是否损坏", e);
-                self.image_texture = None;
-                self.image_size = None;
-            }
-        }
-    }
-
+    
     pub fn show(&mut self, ui: &mut egui::Ui) {
         if let Some(path) = &self.current_file {
             ui.vertical(|ui| {
@@ -426,6 +409,130 @@ impl Preview {
                 };
                 self.texture_cache.insert(cache_key, cached);
                 self.cleanup_cache();
+            }
+        }
+    }
+
+    // 异步图片加载
+    fn start_async_loading(&mut self, path: PathBuf, ctx: egui::Context) {
+        let result_arc: Arc<Mutex<Option<LoadingResult>>> = Arc::new(Mutex::new(None));
+        self.loading_result = Some(result_arc.clone());
+
+        // 克隆必要的变量到线程中
+        let path_clone = path.clone();
+        let ctx_clone = ctx.clone();
+
+        // 启动后台线程进行图片加载
+        thread::spawn(move || {
+            let loading_result = Self::load_image_in_background(&path_clone, &ctx_clone);
+
+            // 将结果写入共享内存
+            if let Ok(mut result_guard) = result_arc.lock() {
+                *result_guard = Some(loading_result);
+            }
+
+            // 请求重绘UI
+            ctx_clone.request_repaint();
+        });
+    }
+
+    // 在后台线程中加载图片
+    fn load_image_in_background(path: &Path, _ctx: &egui::Context) -> LoadingResult {
+        // 检查是否为目录
+        if path.is_dir() {
+            return LoadingResult {
+                image_data: None,
+                size: None,
+                error: Some("这是一个文件夹，不是图片文件".to_string()),
+                file_path: path.to_path_buf(),
+            };
+        }
+
+        // 检查文件是否存在
+        if !path.exists() {
+            return LoadingResult {
+                image_data: None,
+                size: None,
+                error: Some("文件不存在".to_string()),
+                file_path: path.to_path_buf(),
+            };
+        }
+
+        // 检查文件扩展名是否为图片格式
+        let is_image = path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
+            .unwrap_or(false);
+
+        if !is_image {
+            return LoadingResult {
+                image_data: None,
+                size: None,
+                error: Some("文件不是支持的图片格式".to_string()),
+                file_path: path.to_path_buf(),
+            };
+        }
+
+        // 检查文件大小
+        if let Ok(metadata) = fs::metadata(path) {
+            let file_size_bytes = metadata.len();
+            if file_size_bytes > 50 * 1024 * 1024 {
+                return LoadingResult {
+                    image_data: None,
+                    size: None,
+                    error: Some(format!("图片文件过大 ({} MB)", file_size_bytes / (1024 * 1024))),
+                    file_path: path.to_path_buf(),
+                };
+            }
+        }
+
+        // 加载图片
+        match image::open(path) {
+            Ok(img) => {
+                let (width, height) = img.dimensions();
+
+                // 检查图片尺寸
+                if width > 8192 || height > 8192 {
+                    return LoadingResult {
+                        image_data: None,
+                        size: Some((width, height)),
+                        error: Some(format!("图片尺寸过大 ({} x {})", width, height)),
+                        file_path: path.to_path_buf(),
+                    };
+                }
+
+                // 转换为RGBA
+                let img_rgba = img.to_rgba8();
+                let size = [img_rgba.width() as usize, img_rgba.height() as usize];
+
+                // 检查图片数据大小
+                let expected_size = size[0] * size[1] * 4;
+                if expected_size > 100 * 1024 * 1024 {
+                    return LoadingResult {
+                        image_data: None,
+                        size: Some((width, height)),
+                        error: Some("图片数据量过大".to_string()),
+                        file_path: path.to_path_buf(),
+                    };
+                }
+
+                // 创建颜色图像数据
+                let image_data = egui::ColorImage::from_rgba_unmultiplied(size, &img_rgba);
+
+                LoadingResult {
+                    image_data: Some(image_data),
+                    size: Some((width, height)),
+                    error: None,
+                    file_path: path.to_path_buf(),
+                }
+            }
+            Err(e) => {
+                LoadingResult {
+                    image_data: None,
+                    size: None,
+                    error: Some(format!("无法加载图片: {}", e)),
+                    file_path: path.to_path_buf(),
+                }
             }
         }
     }
