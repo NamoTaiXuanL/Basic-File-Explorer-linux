@@ -259,7 +259,7 @@ impl FileList {
                 let painter = ui.painter();
                 let name_rect = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + name_w, rect.bottom()));
 
-                // 目录使用自定义图标，EXE/DLL/TXT/代码文件使用自定义图标，其他文件使用原有emoji
+                // 目录使用自定义图标，EXE/DLL/TXT/代码/无格式文件使用自定义图标，其他文件使用原有emoji
                 if file.is_dir {
                     // 详细信息模式使用更小的图标 (16px)
                     self.draw_folder_icon_sized(painter, name_rect.left() + 6.0, rect.center().y, 16.0);
@@ -283,6 +283,16 @@ impl FileList {
                 } else if self.is_code_file(&file.path) {
                     // 代码文件使用自定义图标 (12px)
                     self.draw_code_icon_sized(painter, name_rect.left() + 6.0, rect.center().y, 12.0);
+                    let text_x = name_rect.left() + 20.0;
+                    painter.with_clip_rect(name_rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
+                } else if self.is_unidentified_file(&file.path) {
+                    // 无格式文件使用自定义图标 (12px)
+                    self.draw_unidentified_icon_sized(painter, name_rect.left() + 6.0, rect.center().y, 12.0);
+                    let text_x = name_rect.left() + 20.0;
+                    painter.with_clip_rect(name_rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
+                } else if self.is_default_file(&file.path) {
+                    // 默认文件使用自定义图标 (12px)
+                    self.draw_default_icon_sized(painter, name_rect.left() + 6.0, rect.center().y, 12.0);
                     let text_x = name_rect.left() + 20.0;
                     painter.with_clip_rect(name_rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
                 } else {
@@ -432,6 +442,32 @@ impl FileList {
                             let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
                             self.draw_code_icon_scaled(painter, center_x, icon_y, icon_size);
                         }
+                    } else if self.is_unidentified_file(&file.path) {
+                        // 绘制无格式文件图标，与文件夹图标对齐
+                        if is_large {
+                            // 大图标模式：使用80%大小的50px图标 (40px)
+                            let icon_size = 50.0 * 0.8; // 40px
+                            let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
+                            self.draw_unidentified_icon_scaled(painter, center_x, icon_y, icon_size);
+                        } else {
+                            // 小图标模式：使用25px图标
+                            let icon_size = 25.0;
+                            let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
+                            self.draw_unidentified_icon_scaled(painter, center_x, icon_y, icon_size);
+                        }
+                    } else if self.is_default_file(&file.path) {
+                        // 绘制默认文件图标，与文件夹图标对齐
+                        if is_large {
+                            // 大图标模式：使用80%大小的50px图标 (40px)
+                            let icon_size = 50.0 * 0.8; // 40px
+                            let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
+                            self.draw_default_icon_scaled(painter, center_x, icon_y, icon_size);
+                        } else {
+                            // 小图标模式：使用25px图标
+                            let icon_size = 25.0;
+                            let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
+                            self.draw_default_icon_scaled(painter, center_x, icon_y, icon_size);
+                        }
                     } else {
                         // 绘制其他文件图标（使用emoji），与文件夹图标对齐
                         let icon_text = utils::get_file_icon(&file.path);
@@ -450,6 +486,10 @@ impl FileList {
                     } else if self.is_txt_file(&file.path) {
                         if is_large { 50.0 * 0.8 } else { 25.0 }
                     } else if self.is_code_file(&file.path) {
+                        if is_large { 50.0 * 0.8 } else { 25.0 }
+                    } else if self.is_unidentified_file(&file.path) {
+                        if is_large { 50.0 * 0.8 } else { 25.0 }
+                    } else if self.is_default_file(&file.path) {
                         if is_large { 50.0 * 0.8 } else { 25.0 }
                     } else {
                         if is_large { 32.0 * 0.8 } else { 16.0 }
@@ -564,6 +604,16 @@ impl FileList {
             } else if self.is_code_file(&file.path) {
                 // 目录框代码文件使用小图标 (12px)
                 self.draw_code_icon_sized(painter, rect.left() + 6.0, rect.center().y, 12.0);
+                let text_x = rect.left() + 20.0;
+                painter.with_clip_rect(rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
+            } else if self.is_unidentified_file(&file.path) {
+                // 目录框无格式文件使用小图标 (12px)
+                self.draw_unidentified_icon_sized(painter, rect.left() + 6.0, rect.center().y, 12.0);
+                let text_x = rect.left() + 20.0;
+                painter.with_clip_rect(rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
+            } else if self.is_default_file(&file.path) {
+                // 目录框默认文件使用小图标 (12px)
+                self.draw_default_icon_sized(painter, rect.left() + 6.0, rect.center().y, 12.0);
                 let text_x = rect.left() + 20.0;
                 painter.with_clip_rect(rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
             } else {
@@ -692,6 +742,33 @@ impl FileList {
             }
         }
         false
+    }
+
+    fn is_unidentified_file(&self, file_path: &PathBuf) -> bool {
+        // 检查文件是否没有后缀名
+        file_path.extension().is_none()
+    }
+
+    fn is_default_file(&self, file_path: &PathBuf) -> bool {
+        // 检查文件是否为其他未定义的文件类型（有后缀但不是已定义的类型）
+        if file_path.extension().is_none() {
+            return false;
+        }
+
+        if let Some(ext) = file_path.extension() {
+            if let Some(ext_str) = ext.to_str() {
+                let ext_lower = ext_str.to_lowercase();
+                // 不是已定义的文件类型
+                !self.is_exe_file(file_path) &&
+                !self.is_dll_file(file_path) &&
+                !self.is_txt_file(file_path) &&
+                !self.is_code_file(file_path)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
     fn draw_exe_icon(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: super::icon_manager::IconSize) {
@@ -900,6 +977,116 @@ impl FileList {
     fn draw_code_icon_scaled(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: f32) {
         // 使用50px纹理，但缩放到指定大小
         if let Some(texture) = self.icon_manager.get_code_texture(super::icon_manager::IconSize::Large) {
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(center_x, center_y),
+                egui::vec2(size, size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_unidentified_icon(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: super::icon_manager::IconSize) {
+        if let Some(texture) = self.icon_manager.get_unidentified_texture(size) {
+            let icon_size = match size {
+                super::icon_manager::IconSize::Small => 25.0,
+                super::icon_manager::IconSize::Large => 50.0,
+            };
+
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(center_x, center_y),
+                egui::vec2(icon_size, icon_size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_unidentified_icon_sized(&self, painter: &egui::Painter, x: f32, y: f32, size: f32) {
+        // 使用25px纹理，但缩放到指定大小
+        if let Some(texture) = self.icon_manager.get_unidentified_texture(super::icon_manager::IconSize::Small) {
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(x + size * 0.5, y),
+                egui::vec2(size, size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_unidentified_icon_scaled(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: f32) {
+        // 使用50px纹理，但缩放到指定大小
+        if let Some(texture) = self.icon_manager.get_unidentified_texture(super::icon_manager::IconSize::Large) {
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(center_x, center_y),
+                egui::vec2(size, size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_default_icon(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: super::icon_manager::IconSize) {
+        if let Some(texture) = self.icon_manager.get_default_texture(size) {
+            let icon_size = match size {
+                super::icon_manager::IconSize::Small => 25.0,
+                super::icon_manager::IconSize::Large => 50.0,
+            };
+
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(center_x, center_y),
+                egui::vec2(icon_size, icon_size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_default_icon_sized(&self, painter: &egui::Painter, x: f32, y: f32, size: f32) {
+        // 使用25px纹理，但缩放到指定大小
+        if let Some(texture) = self.icon_manager.get_default_texture(super::icon_manager::IconSize::Small) {
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(x + size * 0.5, y),
+                egui::vec2(size, size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    fn draw_default_icon_scaled(&self, painter: &egui::Painter, center_x: f32, center_y: f32, size: f32) {
+        // 使用50px纹理，但缩放到指定大小
+        if let Some(texture) = self.icon_manager.get_default_texture(super::icon_manager::IconSize::Large) {
             let rect = egui::Rect::from_center_size(
                 egui::pos2(center_x, center_y),
                 egui::vec2(size, size)
