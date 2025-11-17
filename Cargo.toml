@@ -20,3 +20,6 @@ embed-resource = "3.0"
 [[bin]]
 name = "file-explorer"
 path = "src/main.rs"
+
+[package.metadata.windows]
+subsystem = "windows"
