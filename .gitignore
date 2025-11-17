@@ -18,6 +18,7 @@ BAT/
 target/
 note/
 AGENTS/
+drives_cache.json
 
 # 忽略下载的安装文件
 *.exe
