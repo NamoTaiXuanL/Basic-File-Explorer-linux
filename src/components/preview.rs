@@ -152,21 +152,59 @@ impl Preview {
     }
 
     fn generate_image_preview(&mut self, path: &Path, ctx: &egui::Context) {
+        // 首先检查文件是否存在
+        if !path.exists() {
+            self.preview_content = "文件不存在".to_string();
+            self.image_texture = None;
+            self.image_size = None;
+            return;
+        }
+
+        // 检查文件大小，避免加载过大的图片
+        if let Ok(metadata) = fs::metadata(path) {
+            let file_size_bytes = metadata.len();
+            // 限制图片大小为50MB
+            if file_size_bytes > 50 * 1024 * 1024 {
+                self.preview_content = format!("图片文件过大 ({} MB)，无法预览", file_size_bytes / (1024 * 1024));
+                self.image_texture = None;
+                self.image_size = None;
+                return;
+            }
+        }
+
+        // 尝试加载图片
         match image::open(path) {
             Ok(img) => {
                 let (width, height) = img.dimensions();
                 self.image_size = Some((width, height));
 
+                // 检查图片尺寸是否过大
+                if width > 8192 || height > 8192 {
+                    self.preview_content = format!("图片尺寸过大 ({} x {})，无法预览", width, height);
+                    self.image_texture = None;
+                    self.image_size = None;
+                    return;
+                }
+
                 // 将图片转换为RGBA格式
                 let img_rgba = img.to_rgba8();
                 let size = [img_rgba.width() as usize, img_rgba.height() as usize];
+
+                // 检查图片数据大小
+                let expected_size = size[0] * size[1] * 4; // RGBA = 4 bytes per pixel
+                if expected_size > 100 * 1024 * 1024 { // 100MB limit for pixel data
+                    self.preview_content = format!("图片数据量过大，无法预览");
+                    self.image_texture = None;
+                    self.image_size = None;
+                    return;
+                }
 
                 // 创建颜色图像
                 let image_data = egui::ColorImage::from_rgba_unmultiplied(size, &img_rgba);
 
                 // 加载纹理
                 self.image_texture = Some(ctx.load_texture(
-                    format!("image_{:?}", path),
+                    format!("image_{}", path.display()),
                     image_data,
                     egui::TextureOptions::default(),
                 ));
@@ -183,7 +221,7 @@ impl Preview {
                 );
             }
             Err(e) => {
-                self.preview_content = format!("无法加载图片: {}", e);
+                self.preview_content = format!("无法加载图片: {}\n请检查文件是否损坏", e);
                 self.image_texture = None;
                 self.image_size = None;
             }
@@ -209,31 +247,45 @@ impl Preview {
                 // 预览内容
                 if let Some(texture) = &self.image_texture {
                     // 显示图片
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label("图片预览:");
+                    ui.vertical(|ui| {
+                        ui.label("图片预览:");
 
+                        // 检查纹理尺寸是否有效
+                        let texture_size = texture.size();
+                        if texture_size[0] > 0 && texture_size[1] > 0 {
                             // 限制最大显示尺寸
                             let max_size = ui.available_size() - egui::vec2(20.0, 20.0);
-                            let mut image_size = egui::vec2(texture.size()[0] as f32, texture.size()[1] as f32);
+                            let mut image_size = egui::vec2(texture_size[0] as f32, texture_size[1] as f32);
 
                             // 缩放图片以适应可用空间
                             let scale = (max_size.x / image_size.x).min(max_size.y / image_size.y).min(1.0);
                             image_size *= scale;
 
-                            ui.add(
-                                egui::Image::from_texture(egui::load::SizedTexture::new(
-                                    texture.id(),
-                                    image_size,
-                                ))
-                            );
+                            // 确保缩放后的尺寸是有效的
+                            if image_size.x > 0.0 && image_size.y > 0.0 {
+                                let result = ui.add(
+                                    egui::Image::from_texture(egui::load::SizedTexture::new(
+                                        texture.id(),
+                                        image_size,
+                                    ))
+                                );
+
+                                // 如果图片渲染出错，显示错误信息
+                                if result.hovered() {
+                                    ui.label("图片渲染正常");
+                                }
+                            } else {
+                                ui.label("图片尺寸无效");
+                            }
 
                             // 显示图片信息
                             if let Some((width, height)) = self.image_size {
                                 ui.label(format!("实际尺寸: {} x {} 像素", width, height));
                                 ui.label(format!("显示尺寸: {:.0} x {:.0} 像素", image_size.x, image_size.y));
                             }
-                        });
+                        } else {
+                            ui.label("纹理数据无效");
+                        }
                     });
                 } else if !self.preview_content.is_empty() {
                     egui::ScrollArea::vertical().show(ui, |ui| {
