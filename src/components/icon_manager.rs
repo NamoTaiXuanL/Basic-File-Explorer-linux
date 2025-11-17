@@ -10,6 +10,8 @@ pub struct IconManager {
     dll_icon_50: Option<egui::ColorImage>,
     txt_icon_25: Option<egui::ColorImage>,
     txt_icon_50: Option<egui::ColorImage>,
+    code_icon_25: Option<egui::ColorImage>,
+    code_icon_50: Option<egui::ColorImage>,
     texture_id_folder_32: Option<egui::TextureHandle>,
     texture_id_folder_64: Option<egui::TextureHandle>,
     texture_id_exe_25: Option<egui::TextureHandle>,
@@ -18,6 +20,8 @@ pub struct IconManager {
     texture_id_dll_50: Option<egui::TextureHandle>,
     texture_id_txt_25: Option<egui::TextureHandle>,
     texture_id_txt_50: Option<egui::TextureHandle>,
+    texture_id_code_25: Option<egui::TextureHandle>,
+    texture_id_code_50: Option<egui::TextureHandle>,
     loaded: bool,
 }
 
@@ -32,6 +36,8 @@ impl IconManager {
             dll_icon_50: None,
             txt_icon_25: None,
             txt_icon_50: None,
+            code_icon_25: None,
+            code_icon_50: None,
             texture_id_folder_32: None,
             texture_id_folder_64: None,
             texture_id_exe_25: None,
@@ -40,6 +46,8 @@ impl IconManager {
             texture_id_dll_50: None,
             texture_id_txt_25: None,
             texture_id_txt_50: None,
+            texture_id_code_25: None,
+            texture_id_code_50: None,
             loaded: false,
         }
     }
@@ -129,6 +137,26 @@ impl IconManager {
             }
         }
 
+        // 加载25px代码文件图标
+        if let Ok(image_data) = std::fs::read("material/png/Code_icon_0_25.png") {
+            if let Ok(image) = image::load_from_memory(&image_data) {
+                let rgba_image = image.to_rgba8();
+                let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                self.code_icon_25 = Some(egui_image);
+            }
+        }
+
+        // 加载50px代码文件图标
+        if let Ok(image_data) = std::fs::read("material/png/Code_icon_0_50.png") {
+            if let Ok(image) = image::load_from_memory(&image_data) {
+                let rgba_image = image.to_rgba8();
+                let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                self.code_icon_50 = Some(egui_image);
+            }
+        }
+
         self.loaded = true;
         Ok(())
     }
@@ -213,6 +241,26 @@ impl IconManager {
                 ));
             }
         }
+
+        if self.texture_id_code_25.is_none() && self.code_icon_25.is_some() {
+            if let Some(ref image) = self.code_icon_25 {
+                self.texture_id_code_25 = Some(ctx.load_texture(
+                    "code_icon_25",
+                    image.clone(),
+                    egui::TextureOptions::default(),
+                ));
+            }
+        }
+
+        if self.texture_id_code_50.is_none() && self.code_icon_50.is_some() {
+            if let Some(ref image) = self.code_icon_50 {
+                self.texture_id_code_50 = Some(ctx.load_texture(
+                    "code_icon_50",
+                    image.clone(),
+                    egui::TextureOptions::default(),
+                ));
+            }
+        }
     }
 
     pub fn get_folder_texture(&self, size: IconSize) -> Option<&egui::TextureHandle> {
@@ -243,6 +291,13 @@ impl IconManager {
         }
     }
 
+    pub fn get_code_texture(&self, size: IconSize) -> Option<&egui::TextureHandle> {
+        match size {
+            IconSize::Small => self.texture_id_code_25.as_ref(),
+            IconSize::Large => self.texture_id_code_50.as_ref(),
+        }
+    }
+
     pub fn is_loaded(&self) -> bool {
         self.loaded &&
         self.texture_id_folder_32.is_some() &&
@@ -252,7 +307,9 @@ impl IconManager {
         self.texture_id_dll_25.is_some() &&
         self.texture_id_dll_50.is_some() &&
         self.texture_id_txt_25.is_some() &&
-        self.texture_id_txt_50.is_some()
+        self.texture_id_txt_50.is_some() &&
+        self.texture_id_code_25.is_some() &&
+        self.texture_id_code_50.is_some()
     }
 }
 
