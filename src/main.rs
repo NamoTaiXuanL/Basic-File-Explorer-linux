@@ -378,6 +378,9 @@ impl eframe::App for FileExplorerApp {
                             // 独立的滚动区域
                             let mut temp_current_path = self.directory_current_path.clone();
                             egui::ScrollArea::vertical().id_salt("directory_scroll").show(ui, |ui| {
+                                // 确保目录框的纹理已加载
+                                self.directory_list.ensure_textures(ui.ctx());
+
                                 let (should_refresh_content, should_navigate_directory, should_open_file) =
                                     self.directory_list.show_for_directory(ui, &mut temp_current_path, &mut self.selected_file);
 

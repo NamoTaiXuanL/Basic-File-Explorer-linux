@@ -4,8 +4,12 @@ use std::collections::HashMap;
 pub struct IconManager {
     folder_icon_32: Option<egui::ColorImage>,
     folder_icon_64: Option<egui::ColorImage>,
-    texture_id_32: Option<egui::TextureHandle>,
-    texture_id_64: Option<egui::TextureHandle>,
+    exe_icon_25: Option<egui::ColorImage>,
+    exe_icon_50: Option<egui::ColorImage>,
+    texture_id_folder_32: Option<egui::TextureHandle>,
+    texture_id_folder_64: Option<egui::TextureHandle>,
+    texture_id_exe_25: Option<egui::TextureHandle>,
+    texture_id_exe_50: Option<egui::TextureHandle>,
     loaded: bool,
 }
 
@@ -14,8 +18,12 @@ impl IconManager {
         Self {
             folder_icon_32: None,
             folder_icon_64: None,
-            texture_id_32: None,
-            texture_id_64: None,
+            exe_icon_25: None,
+            exe_icon_50: None,
+            texture_id_folder_32: None,
+            texture_id_folder_64: None,
+            texture_id_exe_25: None,
+            texture_id_exe_50: None,
             loaded: false,
         }
     }
@@ -45,14 +53,34 @@ impl IconManager {
             }
         }
 
+        // 加载25px EXE图标
+        if let Ok(image_data) = std::fs::read("material/png/Exe_icon_0_25.png") {
+            if let Ok(image) = image::load_from_memory(&image_data) {
+                let rgba_image = image.to_rgba8();
+                let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                self.exe_icon_25 = Some(egui_image);
+            }
+        }
+
+        // 加载50px EXE图标
+        if let Ok(image_data) = std::fs::read("material/png/Exe_icon_0_50.png") {
+            if let Ok(image) = image::load_from_memory(&image_data) {
+                let rgba_image = image.to_rgba8();
+                let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                self.exe_icon_50 = Some(egui_image);
+            }
+        }
+
         self.loaded = true;
         Ok(())
     }
 
     pub fn ensure_textures(&mut self, ctx: &egui::Context) {
-        if self.texture_id_32.is_none() && self.folder_icon_32.is_some() {
+        if self.texture_id_folder_32.is_none() && self.folder_icon_32.is_some() {
             if let Some(ref image) = self.folder_icon_32 {
-                self.texture_id_32 = Some(ctx.load_texture(
+                self.texture_id_folder_32 = Some(ctx.load_texture(
                     "folder_icon_32",
                     image.clone(),
                     egui::TextureOptions::default(),
@@ -60,10 +88,30 @@ impl IconManager {
             }
         }
 
-        if self.texture_id_64.is_none() && self.folder_icon_64.is_some() {
+        if self.texture_id_folder_64.is_none() && self.folder_icon_64.is_some() {
             if let Some(ref image) = self.folder_icon_64 {
-                self.texture_id_64 = Some(ctx.load_texture(
+                self.texture_id_folder_64 = Some(ctx.load_texture(
                     "folder_icon_64",
+                    image.clone(),
+                    egui::TextureOptions::default(),
+                ));
+            }
+        }
+
+        if self.texture_id_exe_25.is_none() && self.exe_icon_25.is_some() {
+            if let Some(ref image) = self.exe_icon_25 {
+                self.texture_id_exe_25 = Some(ctx.load_texture(
+                    "exe_icon_25",
+                    image.clone(),
+                    egui::TextureOptions::default(),
+                ));
+            }
+        }
+
+        if self.texture_id_exe_50.is_none() && self.exe_icon_50.is_some() {
+            if let Some(ref image) = self.exe_icon_50 {
+                self.texture_id_exe_50 = Some(ctx.load_texture(
+                    "exe_icon_50",
                     image.clone(),
                     egui::TextureOptions::default(),
                 ));
@@ -73,13 +121,24 @@ impl IconManager {
 
     pub fn get_folder_texture(&self, size: IconSize) -> Option<&egui::TextureHandle> {
         match size {
-            IconSize::Small => self.texture_id_32.as_ref(),
-            IconSize::Large => self.texture_id_64.as_ref(),
+            IconSize::Small => self.texture_id_folder_32.as_ref(),
+            IconSize::Large => self.texture_id_folder_64.as_ref(),
+        }
+    }
+
+    pub fn get_exe_texture(&self, size: IconSize) -> Option<&egui::TextureHandle> {
+        match size {
+            IconSize::Small => self.texture_id_exe_25.as_ref(),
+            IconSize::Large => self.texture_id_exe_50.as_ref(),
         }
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.loaded && self.texture_id_32.is_some() && self.texture_id_64.is_some()
+        self.loaded &&
+        self.texture_id_folder_32.is_some() &&
+        self.texture_id_folder_64.is_some() &&
+        self.texture_id_exe_25.is_some() &&
+        self.texture_id_exe_50.is_some()
     }
 }
 
