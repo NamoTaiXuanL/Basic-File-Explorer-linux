@@ -4,6 +4,7 @@ use std::fs;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::sync::mpsc::{self, Sender, Receiver};
 use crate::utils;
 use image::GenericImageView;
 
@@ -20,6 +21,8 @@ pub struct Preview {
     pending_file: Option<PathBuf>,
     // 异步加载
     loading_result: Option<Arc<Mutex<Option<LoadingResult>>>>,
+    // 多线程预加载
+    preloader: Option<ThumbnailPreloader>,
 }
 
 struct LoadingResult {
@@ -43,6 +46,92 @@ struct FileInfo {
     file_type: String,
 }
 
+// 多线程缩略图预加载器
+struct ThumbnailPreloader {
+    sender: mpsc::Sender<PathBuf>,
+    cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
+    _threads: Vec<thread::JoinHandle<()>>,
+}
+
+impl ThumbnailPreloader {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel::<PathBuf>();
+        let cache = Arc::new(Mutex::new(HashMap::new()));
+
+        // 启动一个预加载线程（暂时用单线程，后续可扩展）
+        let cache_clone = cache.clone();
+        thread::spawn(move || {
+            while let Ok(image_path) = receiver.recv() {
+                if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
+                    let cache_key = image_path.to_string_lossy().to_string();
+                    let size = (thumbnail.width(), thumbnail.height());
+                    if let Ok(mut cache_guard) = cache_clone.lock() {
+                        // 暂时缓存原始图像数据，纹理创建在主线程进行
+                        cache_guard.insert(cache_key, (thumbnail, size));
+                    }
+                }
+            }
+        });
+
+        Self {
+            sender,
+            cache,
+            _threads: Vec::new(),
+        }
+    }
+
+    fn preload_images(&self, paths: &[PathBuf]) {
+        for path in paths {
+            if let Ok(metadata) = fs::metadata(path) {
+                if metadata.len() < 10 * 1024 * 1024 { // 只预加载小于10MB的图片
+                    let _ = self.sender.send(path.clone());
+                }
+            }
+        }
+    }
+
+    fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
+        let cache_key = path.to_string_lossy().to_string();
+        if let Ok(mut cache_guard) = self.cache.lock() {
+            if let Some((rgba_img, size)) = cache_guard.remove(&cache_key) {
+                // 在主线程创建纹理
+                let color_image = egui::ColorImage::from_rgba_premultiplied(
+                    [rgba_img.width() as usize, rgba_img.height() as usize],
+                    &rgba_img
+                );
+                let texture = ctx.load_texture(
+                    format!("preloaded_{}", cache_key),
+                    color_image,
+                    egui::TextureOptions::default(),
+                );
+                Some((texture, size))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn generate_thumbnail(path: &Path) -> Result<image::RgbaImage, Box<dyn std::error::Error>> {
+        let img = image::open(path)?;
+
+        // 统一生成400px缩略图用于预加载
+        let thumbnail_size = 400;
+        let thumbnail = if img.width() > thumbnail_size || img.height() > thumbnail_size {
+            let scale = (thumbnail_size as f32 / img.width().max(img.height()) as f32).min(1.0);
+            let new_width = (img.width() as f32 * scale) as u32;
+            let new_height = (img.height() as f32 * scale) as u32;
+
+            img.resize(new_width, new_height, image::imageops::FilterType::Nearest)
+        } else {
+            img
+        };
+
+        Ok(thumbnail.to_rgba8())
+    }
+}
+
 impl Preview {
     pub fn new() -> Self {
         Self {
@@ -55,6 +144,34 @@ impl Preview {
             is_loading: false,
             pending_file: None,
             loading_result: None,
+            preloader: None, // 稍后在第一次使用时初始化
+        }
+    }
+
+    // 初始化预加载器
+    pub fn init_preloader(&mut self) {
+        if self.preloader.is_none() {
+            self.preloader = Some(ThumbnailPreloader::new());
+        }
+    }
+
+    // 预加载文件夹中的所有图片
+    pub fn preload_folder_images(&mut self, folder_path: &Path) {
+        if let Some(preloader) = &self.preloader {
+            if let Ok(entries) = fs::read_dir(folder_path) {
+                let image_paths: Vec<PathBuf> = entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
+                            .unwrap_or(false)
+                    })
+                    .collect();
+
+                preloader.preload_images(&image_paths);
+            }
         }
     }
 
@@ -106,26 +223,49 @@ impl Preview {
                     self.generate_text_preview(&path);
                 }
                 Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => {
-                    // 图片文件预览
-                    // 先检查缓存，如果有就直接显示
-                    if let Some((texture, size)) = self.get_cached_image(&path) {
-                        self.image_texture = Some(texture);
-                        self.image_size = Some(size);
-                        self.preview_content = format!(
-                            "图片预览 (已缓存)\n\n尺寸: {} x {} 像素\n格式: {}",
-                            size.0,
-                            size.1,
-                            path.extension()
-                                .and_then(|ext| ext.to_str())
-                                .map(|ext| ext.to_uppercase())
-                                .unwrap_or_else(|| "未知".to_string())
-                        );
-                        self.is_loading = false;
-                    } else {
-                        // 没有缓存，启动异步加载
-                        self.is_loading = true;
-                        self.preview_content = "正在加载图片...".to_string();
-                        self.start_async_loading(path.clone(), ctx.clone());
+                    // 图片文件预览 - 简化逻辑
+                    let mut found = false;
+
+                    // 1. 先检查预加载缓存（最快）
+                    if let Some(preloader) = &self.preloader {
+                        if let Some((texture, size)) = preloader.get_cached_thumbnail(&path, ctx) {
+                            self.image_texture = Some(texture);
+                            self.image_size = Some(size);
+                            self.preview_content = format!(
+                                "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
+                                size.0,
+                                size.1,
+                                path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| ext.to_uppercase())
+                                    .unwrap_or_else(|| "未知".to_string())
+                            );
+                            self.is_loading = false;
+                            found = true;
+                        }
+                    }
+
+                    // 2. 如果预加载缓存没有，检查普通缓存
+                    if !found {
+                        if let Some((texture, size)) = self.get_cached_image(&path) {
+                            self.image_texture = Some(texture);
+                            self.image_size = Some(size);
+                            self.preview_content = format!(
+                                "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
+                                size.0,
+                                size.1,
+                                path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| ext.to_uppercase())
+                                    .unwrap_or_else(|| "未知".to_string())
+                            );
+                            self.is_loading = false;
+                        } else {
+                            // 3. 没有缓存，启动异步加载
+                            self.is_loading = true;
+                            self.preview_content = "正在加载图片...".to_string();
+                            self.start_async_loading(path.clone(), ctx.clone());
+                        }
                     }
                 }
                 _ => {
@@ -451,7 +591,7 @@ impl Preview {
         });
     }
 
-    // 在后台线程中加载图片
+    // 在后台线程中加载图片 - 简化版本，只生成缩略图
     fn load_image_in_background(path: &Path, _ctx: &egui::Context) -> LoadingResult {
         // 检查是否为目录
         if path.is_dir() {
@@ -463,17 +603,7 @@ impl Preview {
             };
         }
 
-        // 检查文件是否存在
-        if !path.exists() {
-            return LoadingResult {
-                img_rgba: None,
-                size: None,
-                error: Some("文件不存在".to_string()),
-                file_path: path.to_path_buf(),
-            };
-        }
-
-        // 检查文件扩展名是否为图片格式
+        // 检查是否为图片格式
         let is_image = path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
@@ -488,53 +618,33 @@ impl Preview {
             };
         }
 
-        // 检查文件大小
-        if let Ok(metadata) = fs::metadata(path) {
-            let file_size_bytes = metadata.len();
-            if file_size_bytes > 50 * 1024 * 1024 {
-                return LoadingResult {
-                    img_rgba: None,
-                    size: None,
-                    error: Some(format!("图片文件过大 ({} MB)", file_size_bytes / (1024 * 1024))),
-                    file_path: path.to_path_buf(),
-                };
-            }
-        }
-
-        // 加载图片
+        // 直接加载并生成缩略图 (最大800px)
         match image::open(path) {
             Ok(img) => {
                 let (width, height) = img.dimensions();
 
-                // 检查图片尺寸
-                if width > 8192 || height > 8192 {
-                    return LoadingResult {
-                        img_rgba: None,
-                        size: Some((width, height)),
-                        error: Some(format!("图片尺寸过大 ({} x {})", width, height)),
-                        file_path: path.to_path_buf(),
-                    };
-                }
+                // 统一生成400px缩略图
+                let thumbnail_size = 400;
+                let (thumb_width, thumb_height, thumbnail) = if width > thumbnail_size || height > thumbnail_size {
+                    let scale = (thumbnail_size as f32 / width.max(height) as f32).min(1.0);
+                    let new_width = (width as f32 * scale) as u32;
+                    let new_height = (height as f32 * scale) as u32;
 
-                // 使用更高效的RGBA转换，避免重复调用
-                let img_rgba = img.to_rgba8();
-                let size = [width as usize, height as usize];
+                    let thumbnail = img.resize(
+                        new_width,
+                        new_height,
+                        image::imageops::FilterType::Nearest // 使用快速缩放
+                    );
+                    (new_width, new_height, thumbnail)
+                } else {
+                    (width, height, img)
+                };
 
-                // 检查图片数据大小
-                let expected_size = size[0] * size[1] * 4;
-                if expected_size > 100 * 1024 * 1024 {
-                    return LoadingResult {
-                        img_rgba: None,
-                        size: Some((width, height)),
-                        error: Some("图片数据量过大".to_string()),
-                        file_path: path.to_path_buf(),
-                    };
-                }
+                let img_rgba = thumbnail.to_rgba8();
 
-                // 直接返回RgbaImage，在主线程中创建ColorImage
                 LoadingResult {
                     img_rgba: Some(img_rgba),
-                    size: Some((width, height)),
+                    size: Some((thumb_width, thumb_height)),
                     error: None,
                     file_path: path.to_path_buf(),
                 }
