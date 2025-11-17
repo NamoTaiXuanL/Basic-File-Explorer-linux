@@ -545,7 +545,10 @@ impl eframe::App for FileExplorerApp {
                             // 右侧标题由贯穿式标题栏提供
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 if let Some(selected_file) = &self.selected_file {
-                                    self.preview.load_preview(selected_file.clone(), ctx);
+                                    // 只有当选中的文件发生变化时才加载预览
+                                    if self.preview.current_file() != Some(selected_file) {
+                                        self.preview.load_preview(selected_file.clone(), ctx);
+                                    }
                                 }
                                 self.preview.update(ctx);
                                 self.preview.show(ui);

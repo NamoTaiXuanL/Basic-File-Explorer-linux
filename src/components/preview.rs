@@ -58,6 +58,10 @@ impl Preview {
         }
     }
 
+    pub fn current_file(&self) -> Option<&PathBuf> {
+        self.current_file.as_ref()
+    }
+
     pub fn clear(&mut self) {
         self.current_file = None;
         self.preview_content.clear();
@@ -72,11 +76,12 @@ impl Preview {
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
+        // 如果当前文件相同且未在加载中，直接返回
         if self.current_file.as_ref() == Some(&path) && !self.is_loading {
             return;
         }
 
-        // 如果当前正在加载其他文件，取消并加载新的
+        // 如果当前正在加载其他文件，设置待处理文件并返回
         if self.is_loading {
             self.pending_file = Some(path.clone());
             return;
@@ -142,81 +147,65 @@ impl Preview {
 
     // 在每帧更新时调用，用于处理异步加载结果
     pub fn update(&mut self, ctx: &egui::Context) {
-        // 先获取需要的信息，避免借用冲突
-        let (should_process, current_file, size, error) = {
-            let mut found = false;
-            let mut cur_file = PathBuf::new();
-            let mut img_size = None;
-            let mut img_error = None;
-
-            if self.is_loading {
-                if let Some(loading_result) = &self.loading_result {
-                    if let Ok(result_guard) = loading_result.lock() {
-                        if let Some(result) = result_guard.as_ref() {
-                            // 检查结果是否对应当前文件
-                            if let Some(current_file) = &self.current_file {
-                                if result.file_path == *current_file {
-                                    found = true;
-                                    cur_file = current_file.clone();
-                                    img_size = result.size;
-                                    img_error = result.error.clone();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            (found, cur_file, img_size, img_error)
-        };
-
-        // 处理结果 - 直接访问loading_result中的数据避免拷贝
-        if should_process {
-            if let Some(loading_result) = &self.loading_result {
-                if let Ok(result_guard) = loading_result.lock() {
-                    if let Some(result) = result_guard.as_ref() {
-                        if let Some(img_rgba) = &result.img_rgba {
-                            if let Some((width, height)) = result.size {
-                                // 从RgbaImage创建ColorImage，避免额外的数据拷贝
-                                let img_size = [img_rgba.width() as usize, img_rgba.height() as usize];
-                                let color_image = egui::ColorImage::from_rgba_premultiplied(img_size, img_rgba);
-
-                                let texture = ctx.load_texture(
-                                    format!("async_image_{}", current_file.display()),
-                                    color_image,
-                                    egui::TextureOptions::default(),
-                                );
-
-                                self.image_texture = Some(texture);
-                                self.image_size = Some((width, height));
-
-                                self.preview_content = format!(
-                                    "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
-                                    width,
-                                    height,
-                                    current_file.extension()
-                                        .and_then(|ext| ext.to_str())
-                                        .map(|ext| ext.to_uppercase())
-                                        .unwrap_or_else(|| "未知".to_string())
-                                );
-                            }
-                        } else if let Some(error) = &result.error {
-                            self.preview_content = format!("无法加载图片: {}", error);
-                            self.image_texture = None;
-                            self.image_size = None;
-                        }
-
-                        self.is_loading = false;
-                    }
-                }
-            }
-        }
-
-        // 检查是否有待处理的文件
-        if !self.is_loading {
+        if !self.is_loading || self.loading_result.is_none() {
+            // 检查是否有待处理的文件
             if let Some(pending) = self.pending_file.take() {
                 self.load_preview(pending, ctx);
             }
+            return;
+        }
+
+        // 使用简单的检查，避免复杂的借用问题
+        let loading_result = self.loading_result.take();
+        if let Some(loading_result) = loading_result {
+            if let Ok(result_guard) = loading_result.lock() {
+                if let Some(result) = result_guard.as_ref() {
+                    // 检查结果是否对应当前文件
+                    if let Some(current_file) = &self.current_file {
+                        if result.file_path == *current_file {
+                            let current_file_clone = current_file.clone();
+                            if let Some(img_rgba) = &result.img_rgba {
+                                if let Some((width, height)) = result.size {
+                                    // 从RgbaImage创建ColorImage，避免额外的数据拷贝
+                                    let img_size = [img_rgba.width() as usize, img_rgba.height() as usize];
+                                    let color_image = egui::ColorImage::from_rgba_premultiplied(img_size, img_rgba);
+
+                                    let texture = ctx.load_texture(
+                                        format!("async_image_{}", current_file_clone.display()),
+                                        color_image,
+                                        egui::TextureOptions::default(),
+                                    );
+
+                                    self.image_texture = Some(texture.clone());
+                                    self.image_size = Some((width, height));
+
+                                    // 缓存图片以提高后续访问性能
+                                    self.cache_image(&current_file_clone, texture, (width, height));
+
+                                    self.preview_content = format!(
+                                        "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
+                                        width,
+                                        height,
+                                        current_file_clone.extension()
+                                            .and_then(|ext| ext.to_str())
+                                            .map(|ext| ext.to_uppercase())
+                                            .unwrap_or_else(|| "未知".to_string())
+                                    );
+                                }
+                            } else if let Some(error) = &result.error {
+                                self.preview_content = format!("无法加载图片: {}", error);
+                                self.image_texture = None;
+                                self.image_size = None;
+                            }
+
+                            self.is_loading = false;
+                            return;
+                        }
+                    }
+                }
+            }
+            // 如果没有处理结果，重新放回去
+            self.loading_result = Some(loading_result);
         }
     }
 
@@ -385,10 +374,8 @@ impl Preview {
 
     // 缓存管理方法
     fn get_cache_key(&self, path: &Path) -> String {
-        let modified_time = path.metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        format!("{}_{:?}", path.to_string_lossy(), modified_time)
+        // 简化缓存键，不包含修改时间以提高性能
+        path.to_string_lossy().to_string()
     }
 
     fn is_cache_valid(&self, path: &Path, cached: &CachedImage) -> bool {
@@ -415,8 +402,11 @@ impl Preview {
     fn get_cached_image(&self, path: &Path) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = self.get_cache_key(path);
         if let Some(cached) = self.texture_cache.get(&cache_key) {
-            if self.is_cache_valid(path, cached) {
-                return Some((cached.texture.clone(), cached.size));
+            // 简化缓存有效性检查，只在文件大小变化时才重新验证
+            if let Ok(metadata) = path.metadata() {
+                if cached.file_size == metadata.len() {
+                    return Some((cached.texture.clone(), cached.size));
+                }
             }
         }
         None
