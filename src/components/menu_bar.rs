@@ -11,7 +11,8 @@ pub fn show_menu_bar(
     show_hidden: &mut bool,
     file_operations: &mut FileOperations,
     selected_file: &Option<PathBuf>,
-    help_system: &mut HelpSystem
+    help_system: &mut HelpSystem,
+    view_mode: &mut super::file_list::ViewMode,
 ) -> (bool, bool, bool, bool, bool) {
     let mut needs_refresh = false;
     let mut should_paste = false;
@@ -96,15 +97,15 @@ pub fn show_menu_bar(
             }
             ui.separator();
             if ui.button("详细信息").clicked() {
-                // TODO: 切换到详细信息视图
+                *view_mode = super::file_list::ViewMode::Details;
                 ui.close_menu();
             }
             if ui.button("大图标").clicked() {
-                // TODO: 切换到大图标视图
+                *view_mode = super::file_list::ViewMode::LargeIcons;
                 ui.close_menu();
             }
             if ui.button("小图标").clicked() {
-                // TODO: 切换到小图标视图
+                *view_mode = super::file_list::ViewMode::SmallIcons;
                 ui.close_menu();
             }
         });

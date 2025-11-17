@@ -6,6 +6,7 @@ pub mod mouse_strategy;
 pub mod file_operations;
 pub mod create_operations;
 pub mod help;
+pub mod icon_manager;
 
 pub use file_list::*;
 pub use preview::*;
@@ -15,3 +16,4 @@ pub use mouse_strategy::*;
 pub use file_operations::*;
 pub use create_operations::*;
 pub use help::*;
+pub use icon_manager::*;

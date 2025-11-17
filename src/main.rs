@@ -91,6 +91,7 @@ struct FileExplorerApp {
     delete_confirmation_message: String,
     show_new_folder_dialog: bool,
     new_folder_name: String,
+    view_mode: components::file_list::ViewMode,
 }
 
 impl FileExplorerApp {
@@ -103,6 +104,10 @@ impl FileExplorerApp {
         // 初始化文件列表
         file_list.refresh(current_path.clone(), false);
         directory_list.refresh(directory_current_path.clone(), false);
+
+        // 加载图标
+        let _ = file_list.load_icons();
+        let _ = directory_list.load_icons();
 
         Self {
             current_path: current_path.clone(),
@@ -125,6 +130,7 @@ impl FileExplorerApp {
             delete_confirmation_message: String::new(),
             show_new_folder_dialog: false,
             new_folder_name: String::new(),
+            view_mode: components::file_list::ViewMode::Details,
         }
     }
 
@@ -217,7 +223,7 @@ impl eframe::App for FileExplorerApp {
             ui.vertical(|ui| {
                 // 菜单栏
                 let (menu_needs_refresh, menu_should_paste, menu_should_rename, menu_should_delete, menu_should_create_folder) =
-                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system);
+                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system, &mut self.view_mode);
 
                 // 处理菜单栏的刷新请求（来自查看和转到功能）
                 if menu_needs_refresh {
@@ -464,7 +470,7 @@ impl eframe::App for FileExplorerApp {
 
                             // 独立的滚动区域
                             egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
-                                let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file);
+                                let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file, self.view_mode);
                                 if should_navigate {
                                     // 内容框点击文件夹时：只更新内容框，不刷新目录框
                                     self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();

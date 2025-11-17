@@ -22,6 +22,14 @@ pub struct FileList {
     col_type_ratio: f32,
     col_size_ratio: f32,
     mouse_strategy: MouseDoubleClickStrategy,
+    icon_manager: super::icon_manager::IconManager,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewMode {
+    Details,    // 详细信息（列表视图）
+    LargeIcons, // 大图标
+    SmallIcons, // 小图标
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,6 +50,7 @@ impl FileList {
             col_type_ratio: 0.15,
             col_size_ratio: 0.15,
             mouse_strategy: MouseDoubleClickStrategy::new(),
+            icon_manager: super::icon_manager::IconManager::new(),
         }
     }
 
@@ -80,6 +89,27 @@ impl FileList {
         }
 
         self.sort_files();
+
+        // 确保图标已加载
+        if !self.icon_manager.is_loaded() {
+            let _ = self.icon_manager.load_icons();
+        }
+    }
+
+    pub fn ensure_textures(&mut self, ctx: &egui::Context) {
+        self.icon_manager.ensure_textures(ctx);
+    }
+
+    pub fn load_icons(&mut self) -> Result<(), String> {
+        self.icon_manager.load_icons()
+    }
+
+    pub fn get_icon_manager(&self) -> &super::icon_manager::IconManager {
+        &self.icon_manager
+    }
+
+    pub fn get_icon_manager_mut(&mut self) -> &mut super::icon_manager::IconManager {
+        &mut self.icon_manager
     }
 
     fn sort_files(&mut self) {
@@ -112,9 +142,20 @@ impl FileList {
         });
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> bool {
+    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, view_mode: ViewMode) -> bool {
+        // 确保纹理已加载
+        self.icon_manager.ensure_textures(ui.ctx());
+
+        match view_mode {
+            ViewMode::Details => self.show_details_view(ui, current_path, selected_file),
+            ViewMode::LargeIcons => self.show_icons_view(ui, current_path, selected_file, true),
+            ViewMode::SmallIcons => self.show_icons_view(ui, current_path, selected_file, false),
+        }
+    }
+
+    fn show_details_view(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>) -> bool {
         let mut should_navigate = false;
-        
+
         // 列头与可调分隔线（内容框）
         {
             let total_w = ui.available_width();
@@ -218,25 +259,11 @@ impl FileList {
                 let painter = ui.painter();
                 let name_rect = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + name_w, rect.bottom()));
 
-                // 目录使用彩色图标，文件使用原有emoji
+                // 目录使用自定义图标，文件使用原有emoji
                 if file.is_dir {
-                    let icon_h = rect.height() * 0.55;
-                    let icon_w = icon_h * 1.2;
-                    let cy = rect.center().y;
-                    let icon_x = name_rect.left() + 6.0;
-                    let body_rect = egui::Rect::from_min_max(
-                        egui::pos2(icon_x, cy - icon_h * 0.35),
-                        egui::pos2(icon_x + icon_w, cy + icon_h * 0.35),
-                    );
-                    let tab_rect = egui::Rect::from_min_max(
-                        egui::pos2(icon_x + icon_w * 0.1, body_rect.top() - icon_h * 0.3),
-                        egui::pos2(icon_x + icon_w * 0.45, body_rect.top()),
-                    );
-                    let folder_color = egui::Color32::from_rgb(255, 200, 64);
-                    painter.with_clip_rect(name_rect).rect_filled(body_rect, 3.0, folder_color);
-                    painter.with_clip_rect(name_rect).rect_filled(tab_rect, 2.0, folder_color);
-                    let text_x = body_rect.right() + 6.0;
-                    painter.with_clip_rect(name_rect).text(egui::pos2(text_x, cy), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
+                    self.draw_folder_icon(painter, name_rect.left() + 6.0, rect.center().y, super::icon_manager::IconSize::Small);
+                    let text_x = name_rect.left() + 38.0;
+                    painter.with_clip_rect(name_rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id.clone(), color);
                 } else {
                     let name_text = format!("{} {}", utils::get_file_icon(&file.path), file.name);
                     painter.with_clip_rect(name_rect).text(egui::pos2(name_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, name_text, font_id.clone(), color);
@@ -261,18 +288,115 @@ impl FileList {
 
                 // 处理点击事件
                 if button_response.double_clicked() && file.is_dir {
-                    // 双击进入文件夹
                     *current_path = file.path.clone();
                     *selected_file = None;
                     should_navigate = true;
                 } else if button_response.double_clicked() && !file.is_dir {
-                    // 双击文件：使用默认程序打开
                     self.mouse_strategy.handle_double_click(file.path.clone());
                 } else if button_response.clicked() {
-                    // 单击选择文件或文件夹
                     *selected_file = Some(file.path.clone());
                 }
             }
+        });
+
+        should_navigate
+    }
+
+    fn show_icons_view(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, is_large: bool) -> bool {
+        let mut should_navigate = false;
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let available_width = ui.available_width();
+
+            // 根据大图标还是小图标设置参数
+            let (icon_size, item_size, columns) = if is_large {
+                (32.0, 80.0, (available_width / 100.0).max(1.0) as usize)
+            } else {
+                (16.0, 50.0, (available_width / 60.0).max(1.0) as usize)
+            };
+
+            // 网格布局
+            ui.horizontal_wrapped(|ui| {
+                for (i, file) in self.files.iter().enumerate() {
+                    let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
+
+                    ui.add_space(4.0);
+
+                    // 创建图标和名称的容器
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(item_size, item_size),
+                        egui::Sense::click()
+                    );
+
+                    // 绘制选中背景
+                    if is_selected {
+                        let visuals = ui.visuals();
+                        ui.painter().rect_filled(rect, 4.0, visuals.widgets.inactive.bg_fill);
+                        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, visuals.widgets.active.fg_stroke.color));
+                    }
+
+                    let painter = ui.painter();
+                    let center_y = rect.center().y;
+                    let center_x = rect.center().x;
+                    let font_id = if is_large {
+                        ui.style().text_styles.get(&egui::TextStyle::Body).cloned().unwrap_or_else(|| egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                    } else {
+                        ui.style().text_styles.get(&egui::TextStyle::Small).cloned().unwrap_or_else(|| egui::FontId::new(10.0, egui::FontFamily::Proportional))
+                    };
+                    let color = ui.visuals().text_color();
+
+                    // 绘制图标
+                    if file.is_dir {
+                        // 使用自定义文件夹图标
+                        let icon_size_type = if is_large {
+                            super::icon_manager::IconSize::Large
+                        } else {
+                            super::icon_manager::IconSize::Small
+                        };
+                        self.draw_folder_icon(painter, center_x, center_y - (item_size * 0.2), icon_size_type);
+                    } else {
+                        // 绘制文件图标（使用emoji）
+                        let icon_text = utils::get_file_icon(&file.path);
+                        let icon_pos = egui::pos2(center_x, center_y - (item_size * 0.2));
+                        painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
+                    }
+
+                    // 绘制文件名
+                    let name_pos = egui::pos2(center_x, center_y + (item_size * 0.3));
+                    let display_name = if file.name.len() > 10 {
+                        // 安全地截断字符串，避免在UTF-8字符中间截断
+                        let mut char_count = 0;
+                        let mut byte_end = 0;
+                        for (i, _) in file.name.char_indices() {
+                            if char_count >= 7 {
+                                break;
+                            }
+                            char_count += 1;
+                            byte_end = i;
+                        }
+                        format!("{}...", &file.name[..byte_end])
+                    } else {
+                        file.name.clone()
+                    };
+                    painter.text(name_pos, egui::Align2::CENTER_CENTER, display_name, font_id, color);
+
+                    // 处理点击事件
+                    if response.double_clicked() && file.is_dir {
+                        *current_path = file.path.clone();
+                        *selected_file = None;
+                        should_navigate = true;
+                    } else if response.double_clicked() && !file.is_dir {
+                        self.mouse_strategy.handle_double_click(file.path.clone());
+                    } else if response.clicked() {
+                        *selected_file = Some(file.path.clone());
+                    }
+
+                    // 每行显示指定数量的项目后换行
+                    if (i + 1) % columns == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
         });
 
         should_navigate
@@ -324,23 +448,9 @@ impl FileList {
             let color = ui.visuals().text_color();
             let painter = ui.painter();
             if file.is_dir {
-                let icon_h = rect.height() * 0.55;
-                let icon_w = icon_h * 1.2;
-                let cy = rect.center().y;
-                let icon_x = rect.left() + 6.0;
-                let body_rect = egui::Rect::from_min_max(
-                    egui::pos2(icon_x, cy - icon_h * 0.35),
-                    egui::pos2(icon_x + icon_w, cy + icon_h * 0.35),
-                );
-                let tab_rect = egui::Rect::from_min_max(
-                    egui::pos2(icon_x + icon_w * 0.1, body_rect.top() - icon_h * 0.3),
-                    egui::pos2(icon_x + icon_w * 0.45, body_rect.top()),
-                );
-                let folder_color = egui::Color32::from_rgb(255, 200, 64);
-                painter.with_clip_rect(rect).rect_filled(body_rect, 3.0, folder_color);
-                painter.with_clip_rect(rect).rect_filled(tab_rect, 2.0, folder_color);
-                let text_x = body_rect.right() + 6.0;
-                painter.with_clip_rect(rect).text(egui::pos2(text_x, cy), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
+                self.draw_folder_icon(painter, rect.left() + 6.0, rect.center().y, super::icon_manager::IconSize::Small);
+                let text_x = rect.left() + 38.0;
+                painter.with_clip_rect(rect).text(egui::pos2(text_x, rect.center().y), egui::Align2::LEFT_CENTER, file.name.clone(), font_id, color);
             } else {
                 painter.with_clip_rect(rect).text(rect.left_center() + egui::vec2(6.0, 0.0), egui::Align2::LEFT_CENTER, format!("{} {}", utils::get_file_icon(&file.path), file.name), font_id, color);
             }
@@ -367,5 +477,26 @@ impl FileList {
         }
 
         (should_refresh_content, should_navigate_directory, should_open_file)
+    }
+
+    fn draw_folder_icon(&self, painter: &egui::Painter, x: f32, y: f32, size: super::icon_manager::IconSize) {
+        if let Some(texture) = self.icon_manager.get_folder_texture(size) {
+            let icon_size = match size {
+                super::icon_manager::IconSize::Small => 32.0,
+                super::icon_manager::IconSize::Large => 64.0,
+            };
+
+            let rect = egui::Rect::from_center_size(
+                egui::pos2(x + icon_size * 0.5, y),
+                egui::vec2(icon_size, icon_size)
+            );
+
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
     }
 }
