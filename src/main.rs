@@ -168,6 +168,8 @@ impl FileExplorerApp {
 
         // 预加载当前文件夹中的所有图片
         if self.current_path.is_dir() {
+            // 确保预加载器已初始化
+            self.preview.init_preloader();
             self.preview.preload_folder_images(&self.current_path);
         }
 
