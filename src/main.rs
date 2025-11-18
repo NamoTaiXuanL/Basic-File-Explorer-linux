@@ -121,13 +121,19 @@ impl FileExplorerApp {
         let _ = file_list.load_icons();
         let _ = directory_list.load_icons();
 
+        let mut preview = Preview::new();
+        preview.init_preloader(); // 初始化预加载器
+
+        // 预加载初始文件夹中的图片
+        preview.preload_folder_images(&current_path);
+
         Self {
             current_path: current_path.clone(),
             directory_current_path,
             selected_file: None,
             file_list,
             directory_list,
-            preview: Preview::new(),
+            preview,
             file_operations: FileOperations::new(),
             create_operations: CreateOperations::new(),
             help_system: HelpSystem::new(),
@@ -159,6 +165,12 @@ impl FileExplorerApp {
     fn refresh_file_list(&mut self) {
         // 只刷新内容框
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
+
+        // 预加载当前文件夹中的所有图片
+        if self.current_path.is_dir() {
+            self.preview.preload_folder_images(&self.current_path);
+        }
+
         // 保存工作区状态
         self.save_current_workspace_state();
     }
