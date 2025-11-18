@@ -267,6 +267,10 @@ impl Preview {
             // 立即开始预加载文件夹中的图片
             self.preload_folder_images(&path);
         } else {
+            // 对于文件，也触发预加载其所在文件夹的图片
+            if let Some(parent) = path.parent() {
+                self.preload_folder_images(parent);
+            }
             // 检查文件类型
             match path.extension().and_then(|ext| ext.to_str()) {
                 Some("txt") | Some("rs") | Some("js") | Some("py") | Some("html") |
@@ -325,14 +329,32 @@ impl Preview {
             }
         }
 
-        // 获取文件信息
-        if let Ok(metadata) = fs::metadata(&path) {
-            self.file_info.size = utils::get_file_size_str(metadata.len());
-            self.file_info.modified = utils::get_file_modified_time(&path)
-                .unwrap_or_else(|| "未知时间".to_string());
-        }
-
+        // 异步获取文件信息（避免阻塞UI）
+        let path_clone = path.clone();
+        std::thread::spawn(move || {
+            let mut file_info = FileInfo::default();
+            if let Ok(metadata) = fs::metadata(&path_clone) {
+                file_info.size = utils::get_file_size_str(metadata.len());
+                file_info.modified = utils::get_file_modified_time(&path_clone)
+                    .unwrap_or_else(|| "未知时间".to_string());
+            }
+            file_info.file_type = if path_clone.is_dir() {
+                "文件夹".to_string()
+            } else {
+                path_clone.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_uppercase())
+                    .unwrap_or_else(|| "文件".to_string())
+            };
+            
+            // 通过通道发送文件信息（需要在Preview结构体中添加接收器）
+            // 暂时先不实现，避免复杂化
+        });
+        
+        // 临时设置基本信息（避免UI卡顿）
         self.file_info.file_type = self.get_file_type(&path);
+        self.file_info.size = "计算中...".to_string();
+        self.file_info.modified = "计算中...".to_string();
     }
 
     // 在每帧更新时调用，用于处理异步加载结果
