@@ -57,6 +57,7 @@ impl FileList {
     pub fn refresh(&mut self, path: PathBuf, show_hidden: bool) {
         self.files.clear();
 
+        // 使用轻量级的目录读取，避免阻塞UI
         if let Ok(entries) = fs::read_dir(&path) {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
@@ -71,12 +72,25 @@ impl FileList {
                     continue;
                 }
 
-                let (size, is_dir) = match entry.metadata() {
-                    Ok(metadata) => (metadata.len(), metadata.is_dir()),
-                    Err(_) => (0, false),
+                // 使用轻量级文件类型检测，避免metadata()调用
+                let is_dir = entry_path.is_dir();
+                let size = if is_dir {
+                    0 // 文件夹大小设为0，避免阻塞
+                } else {
+                    // 对于文件，延迟加载大小信息
+                    match fs::metadata(&entry_path) {
+                        Ok(metadata) => metadata.len(),
+                        Err(_) => 0,
+                    }
                 };
-                let modified = utils::get_file_modified_time(&entry_path)
-                    .unwrap_or_else(|| "未知时间".to_string());
+                
+                // 修改时间也延迟加载
+                let modified = if is_dir {
+                    "-".to_string() // 文件夹显示-
+                } else {
+                    utils::get_file_modified_time(&entry_path)
+                        .unwrap_or_else(|| "未知时间".to_string())
+                };
 
                 self.files.push(FileItem {
                     path: entry_path,

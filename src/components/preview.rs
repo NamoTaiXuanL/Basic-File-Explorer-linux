@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic;
 use std::thread;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 use crate::utils;
 use image::GenericImageView;
 
@@ -50,7 +51,9 @@ struct FileInfo {
 struct ThumbnailPreloader {
     sender: mpsc::Sender<PathBuf>,
     cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
-    _threads: Vec<thread::JoinHandle<()>>,
+    threads: Vec<thread::JoinHandle<()>>,
+    stop_signal: Arc<atomic::AtomicBool>,
+    thread_count: usize,
 }
 
 impl ThumbnailPreloader {
@@ -58,31 +61,49 @@ impl ThumbnailPreloader {
         let (sender, receiver) = mpsc::channel::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
-        // 启动20个预加载线程以提高并发性能
+        // 可配置的线程数量（4-20之间）
+        let thread_count = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(4, 20))
+            .unwrap_or(8);
+
         let mut threads = Vec::new();
         
-        // 使用工作队列模式：单个消费者线程分发任务到线程池
-        let cache_clone = cache.clone();
-        threads.push(thread::spawn(move || {
-            while let Ok(image_path) = receiver.recv() {
-                let cache_clone = cache_clone.clone();
-                thread::spawn(move || {
+        // 创建工作线程 - 使用Arc包装receiver
+        let receiver_arc = Arc::new(Mutex::new(receiver));
+        for _ in 0..thread_count {
+            let receiver_arc = receiver_arc.clone();
+            let cache_clone = cache.clone();
+            threads.push(thread::spawn(move || {
+                while let Ok(image_path) = receiver_arc.lock().unwrap().recv() {
                     if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
                         let cache_key = image_path.to_string_lossy().to_string();
                         let size = (thumbnail.width(), thumbnail.height());
                         if let Ok(mut cache_guard) = cache_clone.lock() {
-                            // 缓存原始图像数据，纹理创建在主线程进行
                             cache_guard.insert(cache_key, (thumbnail, size));
                         }
                     }
-                });
-            }
-        }));
+                }
+            }));
+        }
 
         Self {
             sender,
             cache,
-            _threads: threads,
+            threads,
+            stop_signal: Arc::new(atomic::AtomicBool::new(false)),
+            thread_count,
+        }
+    }
+
+    // 优雅关闭预加载器
+    fn shutdown(&mut self) {
+        self.stop_signal.store(true, atomic::Ordering::SeqCst);
+        // 关闭发送通道，让工作线程自然退出
+        drop(self.sender.clone());
+        
+        // 等待所有线程完成
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
         }
     }
 
@@ -197,6 +218,15 @@ impl Preview {
         self.loading_result = None;
         // 清理缓存但保留最近的几个以提高性能
         self.cleanup_cache();
+    }
+
+    // 清理资源，关闭预加载器
+    pub fn cleanup(&mut self) {
+        if let Some(preloader) = &mut self.preloader {
+            preloader.shutdown();
+        }
+        self.preloader = None;
+        self.texture_cache.clear();
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -377,7 +407,8 @@ impl Preview {
                     self.generate_text_preview(path);
                 }
                 Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") => {
-                    self.generate_preview(path, ctx);
+                    // 图片预览逻辑已在前面的load_preview方法中处理
+                    // 这里不需要重复处理，避免无限递归
                 }
                 _ => {
                     self.preview_content = "此文件类型不支持预览".to_string();
