@@ -159,19 +159,15 @@ impl FileExplorerApp {
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
+            
+            // 异步预加载新文件夹中的图片（不阻塞UI操作）
+            self.async_preload_images();
         }
     }
 
     fn refresh_file_list(&mut self) {
         // 只刷新内容框
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
-
-        // 预加载当前文件夹中的所有图片
-        if self.current_path.is_dir() {
-            // 确保预加载器已初始化
-            self.preview.init_preloader();
-            self.preview.preload_folder_images(&self.current_path);
-        }
 
         // 保存工作区状态
         self.save_current_workspace_state();
@@ -180,8 +176,18 @@ impl FileExplorerApp {
     fn refresh_directory_list(&mut self) {
         // 只刷新目录框
         self.directory_list.refresh(self.directory_current_path.clone(), self.show_hidden);
-        // 保存工作区状态
-        self.save_current_workspace_state();
+    }
+
+    // 异步预加载当前文件夹中的图片（不阻塞UI）
+    fn async_preload_images(&mut self) {
+        if self.current_path.is_dir() {
+            // 确保预加载器已初始化
+            self.preview.init_preloader();
+            
+            // 直接调用预览组件的异步预加载方法
+            // 这个方法已经在后台线程中执行文件系统操作
+            self.preview.preload_folder_images(&self.current_path);
+        }
     }
 
     fn navigate_directory_to(&mut self, path: PathBuf) {
