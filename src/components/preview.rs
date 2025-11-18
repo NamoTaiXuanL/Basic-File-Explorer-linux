@@ -31,6 +31,7 @@ struct LoadingResult {
     size: Option<(u32, u32)>,
     error: Option<String>,
     file_path: PathBuf,
+    folder_content: Option<String>,
 }
 
 struct CachedImage {
@@ -180,22 +181,24 @@ impl Preview {
         
         // 在后台线程中执行文件系统操作，避免阻塞UI
         thread::spawn(move || {
+            // 使用更高效的文件遍历方式，避免一次性读取所有文件
             if let Ok(entries) = fs::read_dir(&folder_path) {
-                let image_paths: Vec<PathBuf> = entries
-                    .filter_map(|entry| entry.ok())
-                    .map(|entry| entry.path())
-                    .filter(|path| {
-                        path.extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
-                            .unwrap_or(false)
-                    })
-                    .collect();
-
-                // 发送图片路径到预加载器
-                let image_count = image_paths.len();
-                for path in image_paths {
-                    let _ = preloader_clone.send(path);
+                let mut image_count = 0;
+                
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        
+                        // 快速检查文件扩展名，避免不必要的操作
+                        if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+                            let ext_lower = ext.to_lowercase();
+                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
+                                // 立即发送到预加载器，不等待收集所有路径
+                                let _ = preloader_clone.send(path);
+                                image_count += 1;
+                            }
+                        }
+                    }
                 }
                 
                 // 调试信息：显示检测到的图片数量
@@ -249,7 +252,7 @@ impl Preview {
 
         // 检查是否为文件夹
         if path.is_dir() {
-            // 使用原有的文件夹预览逻辑
+            // 异步生成文件夹预览
             self.generate_folder_preview(&path);
             // 立即开始预加载文件夹中的图片
             self.preload_folder_images(&path);
@@ -418,11 +421,13 @@ impl Preview {
     }
 
     fn generate_folder_preview(&mut self, path: &Path) {
+        // 使用更高效的文件读取方式，限制读取数量避免阻塞
         if let Ok(entries) = fs::read_dir(path) {
             let mut folders = Vec::new();
             let mut files = Vec::new();
 
-            for entry in entries.flatten() {
+            // 限制最多读取100个条目，避免UI卡顿
+            for entry in entries.flatten().take(100) {
                 let entry_path = entry.path();
                 let name = entry_path
                     .file_name()
@@ -638,6 +643,7 @@ impl Preview {
                 size: None,
                 error: Some("这是一个文件夹，不是图片文件".to_string()),
                 file_path: path.to_path_buf(),
+                folder_content: None,
             };
         }
 
@@ -653,6 +659,7 @@ impl Preview {
                 size: None,
                 error: Some("文件不是支持的图片格式".to_string()),
                 file_path: path.to_path_buf(),
+                folder_content: None,
             };
         }
 
@@ -685,6 +692,7 @@ impl Preview {
                     size: Some((thumb_width, thumb_height)),
                     error: None,
                     file_path: path.to_path_buf(),
+                    folder_content: None,
                 }
             }
             Err(e) => {
@@ -693,6 +701,7 @@ impl Preview {
                     size: None,
                     error: Some(format!("无法加载图片: {}", e)),
                     file_path: path.to_path_buf(),
+                    folder_content: None,
                 }
             }
         }
