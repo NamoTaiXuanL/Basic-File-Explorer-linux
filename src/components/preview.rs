@@ -22,8 +22,8 @@ pub struct Preview {
     pending_file: Option<PathBuf>,
     // 异步加载
     loading_result: Option<Arc<Mutex<Option<LoadingResult>>>>,
-    // 多线程预加载
-    preloader: Option<ThumbnailPreloader>,
+    // 多线程预加载 - 直接包含，不再使用Option
+    preloader: ThumbnailPreloader,
 }
 
 struct LoadingResult {
@@ -61,10 +61,10 @@ impl ThumbnailPreloader {
         let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
-        // 可配置的线程数量（4-20之间）
+        // 可配置的线程数量（8-32之间），增加线程数提高预加载速度
         let thread_count = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(4, 20))
-            .unwrap_or(8);
+            .map(|n| n.get().clamp(8, 32))
+            .unwrap_or(16);
 
         let mut threads = Vec::new();
         
@@ -162,50 +162,46 @@ impl Preview {
             is_loading: false,
             pending_file: None,
             loading_result: None,
-            preloader: None, // 稍后在第一次使用时初始化
+            preloader: ThumbnailPreloader::new(), // 直接初始化预加载器
         }
     }
 
-    // 初始化预加载器
+    // 初始化预加载器 (已废弃，预加载器现在总是初始化)
+    #[allow(dead_code)]
     pub fn init_preloader(&mut self) {
-        if self.preloader.is_none() {
-            self.preloader = Some(ThumbnailPreloader::new());
-            println!("预加载器已初始化");
-        }
+        println!("预加载器已初始化");
     }
 
     // 预加载文件夹中的所有图片
     pub fn preload_folder_images(&mut self, folder_path: &Path) {
         println!("开始预加载文件夹: {:?}", folder_path);
-        if let Some(preloader) = &self.preloader {
-            let preloader_clone = preloader.sender.clone();
-            let folder_path = folder_path.to_path_buf();
-            
-            // 在后台线程中执行文件系统操作，避免阻塞UI
-            thread::spawn(move || {
-                if let Ok(entries) = fs::read_dir(&folder_path) {
-                    let image_paths: Vec<PathBuf> = entries
-                        .filter_map(|entry| entry.ok())
-                        .map(|entry| entry.path())
-                        .filter(|path| {
-                            path.extension()
-                                .and_then(|ext| ext.to_str())
-                                .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
-                                .unwrap_or(false)
-                        })
-                        .collect();
+        let preloader_clone = self.preloader.sender.clone();
+        let folder_path = folder_path.to_path_buf();
+        
+        // 在后台线程中执行文件系统操作，避免阻塞UI
+        thread::spawn(move || {
+            if let Ok(entries) = fs::read_dir(&folder_path) {
+                let image_paths: Vec<PathBuf> = entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
+                            .unwrap_or(false)
+                    })
+                    .collect();
 
-                    // 发送图片路径到预加载器
-                    let image_count = image_paths.len();
-                    for path in image_paths {
-                        let _ = preloader_clone.send(path);
-                    }
-                    
-                    // 调试信息：显示检测到的图片数量
-                    println!("检测到 {} 张图片，开始异步预加载", image_count);
+                // 发送图片路径到预加载器
+                let image_count = image_paths.len();
+                for path in image_paths {
+                    let _ = preloader_clone.send(path);
                 }
-            });
-        }
+                
+                // 调试信息：显示检测到的图片数量
+                println!("检测到 {} 张图片，开始异步预加载", image_count);
+            }
+        });
     }
 
     pub fn current_file(&self) -> Option<&PathBuf> {
@@ -227,11 +223,10 @@ impl Preview {
 
     // 清理资源，关闭预加载器
     pub fn cleanup(&mut self) {
-        if let Some(preloader) = &mut self.preloader {
-            preloader.shutdown();
-        }
-        self.preloader = None;
+        self.preloader.shutdown();
         self.texture_cache.clear();
+        // 重新初始化预加载器以保持可用性
+        self.preloader = ThumbnailPreloader::new();
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -256,6 +251,8 @@ impl Preview {
         if path.is_dir() {
             // 使用原有的文件夹预览逻辑
             self.generate_folder_preview(&path);
+            // 立即开始预加载文件夹中的图片
+            self.preload_folder_images(&path);
         } else {
             // 检查文件类型
             match path.extension().and_then(|ext| ext.to_str()) {
@@ -269,22 +266,20 @@ impl Preview {
                     let mut found = false;
 
                     // 1. 先检查预加载缓存（最快）
-                    if let Some(preloader) = &self.preloader {
-                        if let Some((texture, size)) = preloader.get_cached_thumbnail(&path, ctx) {
-                            self.image_texture = Some(texture);
-                            self.image_size = Some(size);
-                            self.preview_content = format!(
-                                "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
-                                size.0,
-                                size.1,
-                                path.extension()
-                                    .and_then(|ext| ext.to_str())
-                                    .map(|ext| ext.to_uppercase())
-                                    .unwrap_or_else(|| "未知".to_string())
-                            );
-                            self.is_loading = false;
-                            found = true;
-                        }
+                    if let Some((texture, size)) = self.preloader.get_cached_thumbnail(&path, ctx) {
+                        self.image_texture = Some(texture);
+                        self.image_size = Some(size);
+                        self.preview_content = format!(
+                            "图片预览\n\n尺寸: {} x {} 像素\n格式: {}",
+                            size.0,
+                            size.1,
+                            path.extension()
+                                .and_then(|ext| ext.to_str())
+                                .map(|ext| ext.to_uppercase())
+                                .unwrap_or_else(|| "未知".to_string())
+                        );
+                        self.is_loading = false;
+                        found = true;
                     }
 
                     // 2. 如果预加载缓存没有，检查普通缓存
