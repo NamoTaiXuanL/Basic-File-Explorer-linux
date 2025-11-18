@@ -12,6 +12,7 @@ chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "5.0"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg", "ico", "rayon"] }
+sysinfo = "0.32"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["shellapi", "shlobj", "fileapi"] }

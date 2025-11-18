@@ -8,6 +8,37 @@ use std::thread;
 use crossbeam_channel::{self, Sender, Receiver};
 use crate::utils;
 use image::GenericImageView;
+use sysinfo::System;
+
+// 计算基于内存的动态缓存大小
+fn calculate_cache_sizes() -> (usize, usize) {
+    let mut system = System::new_all();
+    system.refresh_memory();
+
+    let total_memory = system.total_memory();
+    let available_memory = system.available_memory();
+
+    // 使用可用内存的10%作为缓存预算，但限制在合理范围内
+    let cache_budget_bytes = (available_memory as f64 * 0.1) as u64;
+
+    // 估算每张图片的平均大小（300px缩略图约 300*300*4 = 360KB）
+    const AVG_IMAGE_SIZE: u64 = 360 * 1024; // 360KB
+
+    // 计算可以缓存的图片数量
+    let estimated_image_count = (cache_budget_bytes / AVG_IMAGE_SIZE) as usize;
+
+    // 设置合理的范围：最少50张，最多2000张
+    let preload_cache_size = estimated_image_count.clamp(50, 2000);
+    let main_cache_size = preload_cache_size / 2; // 主缓存稍小一些
+
+    println!("系统内存: {}MB, 可用: {}MB, 预加载缓存: {}张, 主缓存: {}张",
+             total_memory / 1024 / 1024,
+             available_memory / 1024 / 1024,
+             preload_cache_size,
+             main_cache_size);
+
+    (preload_cache_size, main_cache_size)
+}
 
 pub struct Preview {
     current_file: Option<PathBuf>,
@@ -31,6 +62,8 @@ pub struct Preview {
     // 延迟预加载状态
     preload_pending: bool,
     pending_folder: Option<PathBuf>,
+    // 动态缓存大小限制
+    max_main_cache_size: usize,
 }
 
 struct LoadingResult {
@@ -62,12 +95,16 @@ struct ThumbnailPreloader {
     threads: Vec<thread::JoinHandle<()>>,
     stop_signal: Arc<atomic::AtomicBool>,
     thread_count: usize,
+    max_cache_size: usize,  // 动态缓存大小限制
 }
 
 impl ThumbnailPreloader {
     fn new() -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
+
+        // 计算动态缓存大小
+        let (preload_cache_size, _) = calculate_cache_sizes();
 
         // 减少线程数量以降低资源消耗：2-8之间
         let thread_count = std::thread::available_parallelism()
@@ -83,31 +120,43 @@ impl ThumbnailPreloader {
             threads.push(thread::spawn(move || {
                 let mut processed_count = 0;
                 while let Ok(image_path) = receiver.recv() {
-                    // 添加缓存大小检查，防止内存过度使用
-                    if let Ok(mut cache_guard) = cache_clone.lock() {
-                        if cache_guard.len() > 200 { // 限制缓存大小
-                            // 清理一半最老的缓存项
-                            let keys_to_remove: Vec<_> = cache_guard.keys()
-                                .take(cache_guard.len() / 2)
-                                .cloned()
-                                .collect();
-                            for key in keys_to_remove {
-                                cache_guard.remove(&key);
+                    // 检查缓存是否已存在，避免重复处理
+                    let cache_key = image_path.to_string_lossy().to_string();
+                    let should_process = if let Ok(cache_guard) = cache_clone.lock() {
+                        !cache_guard.contains_key(&cache_key)
+                    } else {
+                        true // 如果无法获取锁，假设需要处理
+                    };
+
+                    if should_process {
+                        // 动态缓存大小检查
+                        if let Ok(mut cache_guard) = cache_clone.lock() {
+                            if cache_guard.len() > preload_cache_size {
+                                // 只清理最老的20%，保留大部分缓存
+                                let cleanup_count = (preload_cache_size / 5).max(10);
+                                let keys_to_remove: Vec<_> = cache_guard.keys()
+                                    .take(cleanup_count)
+                                    .cloned()
+                                    .collect();
+                                for key in keys_to_remove {
+                                    cache_guard.remove(&key);
+                                }
+                                println!("预加载缓存清理: 移除{}项，当前缓存大小: {}",
+                                         cleanup_count, cache_guard.len());
                             }
                         }
-                    }
 
-                    if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
-                        let cache_key = image_path.to_string_lossy().to_string();
-                        let size = (thumbnail.width(), thumbnail.height());
-                        if let Ok(mut cache_guard) = cache_clone.lock() {
-                            cache_guard.insert(cache_key, (thumbnail, size));
-                        }
+                        if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
+                            let size = (thumbnail.width(), thumbnail.height());
+                            if let Ok(mut cache_guard) = cache_clone.lock() {
+                                cache_guard.insert(cache_key, (thumbnail, size));
+                            }
 
-                        processed_count += 1;
-                        // 每个线程处理50张图片后休息一下，避免过度占用CPU
-                        if processed_count % 50 == 0 {
-                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            processed_count += 1;
+                            // 每个线程处理30张图片后休息一下，减少CPU占用
+                            if processed_count % 30 == 0 {
+                                std::thread::sleep(std::time::Duration::from_millis(30));
+                            }
                         }
                     }
                 }
@@ -120,6 +169,7 @@ impl ThumbnailPreloader {
             threads,
             stop_signal: Arc::new(atomic::AtomicBool::new(false)),
             thread_count,
+            max_cache_size: preload_cache_size,
         }
     }
 
@@ -187,6 +237,9 @@ impl Preview {
         // 创建异步文件夹预览通道
         let (folder_sender, folder_receiver) = crossbeam_channel::unbounded();
 
+        // 计算动态缓存大小
+        let (_, main_cache_size) = calculate_cache_sizes();
+
         Self {
             current_file: None,
             current_folder: None,  // 初始化当前文件夹跟踪
@@ -203,6 +256,7 @@ impl Preview {
             folder_preview_receiver: Some(folder_receiver),
             preload_pending: false,
             pending_folder: None,
+            max_main_cache_size: main_cache_size,
         }
     }
 
@@ -210,7 +264,16 @@ impl Preview {
     pub fn request_delayed_preload(&mut self, folder_path: &Path) {
         self.preload_pending = true;
         self.pending_folder = Some(folder_path.to_path_buf());
-        println!("请求延迟预加载: {:?}", folder_path);
+
+        // 显示缓存状态信息
+        let preload_cache_size = if let Ok(cache_guard) = self.preloader.cache.lock() {
+            cache_guard.len()
+        } else {
+            0
+        };
+
+        println!("请求延迟预加载: {:?}, 当前预加载缓存: {}项, 主缓存: {}项",
+                folder_path, preload_cache_size, self.texture_cache.len());
     }
 
     // 初始化预加载器 (已废弃，预加载器现在总是初始化)
@@ -299,11 +362,9 @@ impl Preview {
 
     // 清理预加载缓存，用于切换文件夹时重置状态
     pub fn clear_preloader_cache(&mut self) {
-        // 清理预加载缓存
-        if let Ok(mut cache_guard) = self.preloader.cache.lock() {
-            cache_guard.clear();
-        }
-        println!("已清理预加载缓存，为新文件夹做准备");
+        // 不清空缓存！预加载的图片应该在全局范围内有效
+        // 只需要更新current_folder即可，让新文件夹的预加载继续使用已有缓存
+        println!("文件夹切换，保留预加载缓存以供复用");
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -701,14 +762,21 @@ impl Preview {
     }
 
     fn cleanup_cache(&mut self) {
-        // 保留最近50个图片的缓存，删除其他（增加缓存数量以提高性能）
-        if self.texture_cache.len() > 100 {
-            let mut keys: Vec<_> = self.texture_cache.keys().cloned().collect();
-            keys.sort(); // 简单的字符串排序，实际项目中可能需要更复杂的策略
+        // 动态主缓存清理策略
+        if self.texture_cache.len() > self.max_main_cache_size {
+            // 只删除最老的20%，保留大部分缓存以提高性能
+            let cleanup_count = (self.max_main_cache_size / 5).max(10);
+            let keys_to_remove: Vec<_> = self.texture_cache.keys()
+                .take(cleanup_count)
+                .cloned()
+                .collect();
 
-            for key in keys.iter().take(self.texture_cache.len() - 100) {
-                self.texture_cache.remove(key);
+            for key in keys_to_remove {
+                self.texture_cache.remove(&key);
             }
+
+            println!("主缓存清理完成，删除了{}项，当前缓存大小: {} / {}",
+                     cleanup_count, self.texture_cache.len(), self.max_main_cache_size);
         }
     }
 
