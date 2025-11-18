@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic;
 use std::thread;
-use std::sync::mpsc;
+use crossbeam_channel::{self, Sender};
 use crate::utils;
 use image::GenericImageView;
 
@@ -49,7 +49,7 @@ struct FileInfo {
 
 // 多线程缩略图预加载器
 struct ThumbnailPreloader {
-    sender: mpsc::Sender<PathBuf>,
+    sender: Sender<PathBuf>,
     cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
     threads: Vec<thread::JoinHandle<()>>,
     stop_signal: Arc<atomic::AtomicBool>,
@@ -58,7 +58,7 @@ struct ThumbnailPreloader {
 
 impl ThumbnailPreloader {
     fn new() -> Self {
-        let (sender, receiver) = mpsc::channel::<PathBuf>();
+        let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
         // 可配置的线程数量（4-20之间）
@@ -68,13 +68,12 @@ impl ThumbnailPreloader {
 
         let mut threads = Vec::new();
         
-        // 创建工作线程 - 使用Arc包装receiver
-        let receiver_arc = Arc::new(Mutex::new(receiver));
+        // 创建工作线程 - 每个线程独立处理接收到的消息
         for _ in 0..thread_count {
-            let receiver_arc = receiver_arc.clone();
+            let receiver = receiver.clone(); // crossbeam Receiver 可以克隆
             let cache_clone = cache.clone();
             threads.push(thread::spawn(move || {
-                while let Ok(image_path) = receiver_arc.lock().unwrap().recv() {
+                while let Ok(image_path) = receiver.recv() {
                     if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
                         let cache_key = image_path.to_string_lossy().to_string();
                         let size = (thumbnail.width(), thumbnail.height());
@@ -171,11 +170,13 @@ impl Preview {
     pub fn init_preloader(&mut self) {
         if self.preloader.is_none() {
             self.preloader = Some(ThumbnailPreloader::new());
+            println!("预加载器已初始化");
         }
     }
 
     // 预加载文件夹中的所有图片
     pub fn preload_folder_images(&mut self, folder_path: &Path) {
+        println!("开始预加载文件夹: {:?}", folder_path);
         if let Some(preloader) = &self.preloader {
             let preloader_clone = preloader.sender.clone();
             let folder_path = folder_path.to_path_buf();
@@ -195,9 +196,13 @@ impl Preview {
                         .collect();
 
                     // 发送图片路径到预加载器
+                    let image_count = image_paths.len();
                     for path in image_paths {
                         let _ = preloader_clone.send(path);
                     }
+                    
+                    // 调试信息：显示检测到的图片数量
+                    println!("检测到 {} 张图片，开始异步预加载", image_count);
                 }
             });
         }
