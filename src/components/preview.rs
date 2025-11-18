@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic;
 use std::thread;
-use crossbeam_channel::{self, Sender};
+use crossbeam_channel::{self, Sender, Receiver};
 use crate::utils;
 use image::GenericImageView;
 
@@ -24,6 +24,9 @@ pub struct Preview {
     loading_result: Option<Arc<Mutex<Option<LoadingResult>>>>,
     // 多线程预加载 - 直接包含，不再使用Option
     preloader: ThumbnailPreloader,
+    // 异步文件夹预览
+    folder_preview_sender: Option<Sender<String>>,
+    folder_preview_receiver: Option<Receiver<String>>,
 }
 
 struct LoadingResult {
@@ -153,6 +156,9 @@ impl ThumbnailPreloader {
 
 impl Preview {
     pub fn new() -> Self {
+        // 创建异步文件夹预览通道
+        let (folder_sender, folder_receiver) = crossbeam_channel::unbounded();
+        
         Self {
             current_file: None,
             preview_content: String::new(),
@@ -164,6 +170,8 @@ impl Preview {
             pending_file: None,
             loading_result: None,
             preloader: ThumbnailPreloader::new(), // 直接初始化预加载器
+            folder_preview_sender: Some(folder_sender),
+            folder_preview_receiver: Some(folder_receiver),
         }
     }
 
@@ -327,6 +335,13 @@ impl Preview {
 
     // 在每帧更新时调用，用于处理异步加载结果
     pub fn update(&mut self, ctx: &egui::Context) {
+        // 首先处理文件夹预览通道
+        if let Some(receiver) = &self.folder_preview_receiver {
+            while let Ok(preview_content) = receiver.try_recv() {
+                self.preview_content = preview_content;
+            }
+        }
+
         if !self.is_loading || self.loading_result.is_none() {
             // 检查是否有待处理的文件
             if let Some(pending) = self.pending_file.take() {
@@ -421,40 +436,58 @@ impl Preview {
     }
 
     fn generate_folder_preview(&mut self, path: &Path) {
-        // 使用更高效的文件读取方式，限制读取数量避免阻塞
-        if let Ok(entries) = fs::read_dir(path) {
-            let mut folders = Vec::new();
-            let mut files = Vec::new();
+        // 显示加载状态，避免UI卡顿
+        self.preview_content = "正在加载文件夹内容...".to_string();
+        
+        // 克隆路径和发送器用于异步操作
+        let path = path.to_path_buf();
+        if let Some(sender) = self.folder_preview_sender.clone() {
+            
+            // 在后台线程中读取文件夹内容
+            std::thread::spawn(move || {
+                let mut folders = Vec::new();
+                let mut files = Vec::new();
+                
+                // 在后台线程中执行文件系统操作
+                if let Ok(entries) = fs::read_dir(&path) {
+                    // 限制最多读取100个条目，避免UI卡顿
+                    for entry in entries.flatten().take(100) {
+                        let entry_path = entry.path();
+                        let name = entry_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("未知")
+                            .to_string();
 
-            // 限制最多读取100个条目，避免UI卡顿
-            for entry in entries.flatten().take(100) {
-                let entry_path = entry.path();
-                let name = entry_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("未知")
-                    .to_string();
-
-                if entry_path.is_dir() {
-                    folders.push(name);
-                } else {
-                    files.push(name);
+                        if entry_path.is_dir() {
+                            folders.push(name);
+                        } else {
+                            files.push(name);
+                        }
+                    }
                 }
-            }
-
-            self.preview_content = format!(
-                "文件夹内容 ({} 个文件夹, {} 个文件)\n\n📁 文件夹:\n{}\n\n📄 文件:\n{}",
-                folders.len(),
-                files.len(),
-                folders.iter().take(20).map(|f| format!("  {}", f)).collect::<Vec<_>>().join("\n"),
-                files.iter().take(20).map(|f| format!("  {}", f)).collect::<Vec<_>>().join("\n")
-            );
-
-            if folders.len() > 20 || files.len() > 20 {
-                self.preview_content.push_str("\n\n... 还有更多项目");
-            }
-        } else {
-            self.preview_content = "无法读取文件夹内容".to_string();
+                
+                // 生成预览内容
+                let preview_content = if !folders.is_empty() || !files.is_empty() {
+                    let mut content = format!(
+                        "文件夹内容 ({} 个文件夹, {} 个文件)\n\n📁 文件夹:\n{}\n\n📄 文件:\n{}",
+                        folders.len(),
+                        files.len(),
+                        folders.iter().take(20).map(|f| format!("  {}", f)).collect::<Vec<_>>().join("\n"),
+                        files.iter().take(20).map(|f| format!("  {}", f)).collect::<Vec<_>>().join("\n")
+                    );
+                    
+                    if folders.len() > 20 || files.len() > 20 {
+                        content.push_str("\n\n... 还有更多项目");
+                    }
+                    content
+                } else {
+                    "文件夹为空或无法读取".to_string()
+                };
+                
+                // 通过通道发送预览内容回主线程
+                let _ = sender.send(preview_content);
+            });
         }
     }
 
