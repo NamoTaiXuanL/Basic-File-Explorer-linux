@@ -114,19 +114,19 @@ impl ThumbnailPreloader {
 
     fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = path.to_string_lossy().to_string();
-        if let Ok(mut cache_guard) = self.cache.lock() {
-            if let Some((rgba_img, size)) = cache_guard.remove(&cache_key) {
+        if let Ok(cache_guard) = self.cache.lock() {
+            if let Some((rgba_img, size)) = cache_guard.get(&cache_key) {
                 // 在主线程创建纹理
                 let color_image = egui::ColorImage::from_rgba_premultiplied(
                     [rgba_img.width() as usize, rgba_img.height() as usize],
-                    &rgba_img
+                    rgba_img
                 );
                 let texture = ctx.load_texture(
                     format!("preloaded_{}", cache_key),
                     color_image,
                     egui::TextureOptions::default(),
                 );
-                Some((texture, size))
+                Some((texture, *size))
             } else {
                 None
             }
@@ -191,9 +191,9 @@ impl Preview {
         thread::spawn(move || {
             // 使用更高效的文件遍历方式，避免一次性读取所有文件
             if let Ok(entries) = fs::read_dir(&folder_path) {
-                let mut image_paths = Vec::new();
+                let mut image_count = 0;
                 
-                // 先收集所有图片路径
+                // 直接发送图片路径，避免收集所有路径再发送
                 for entry in entries.flatten() {
                     let path = entry.path();
                     
@@ -201,25 +201,18 @@ impl Preview {
                     if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
                         let ext_lower = ext.to_lowercase();
                         if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
-                            image_paths.push(path);
+                            let _ = preloader_clone.send(path);
+                            image_count += 1;
+                            
+                            // 每处理10个文件添加短暂延迟，避免瞬间创建大量任务
+                            if image_count % 10 == 0 {
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                            }
                         }
                     }
                 }
                 
-                println!("检测到 {} 张图片，开始分批异步预加载", image_paths.len());
-                
-                // 分批发送预加载任务，避免瞬间创建大量线程
-                let batch_size = 10; // 每批发送10个任务
-                let delay_ms = 50;   // 每批之间延迟50毫秒
-                
-                for (i, path) in image_paths.into_iter().enumerate() {
-                    let _ = preloader_clone.send(path);
-                    
-                    // 每批结束后添加延迟
-                    if (i + 1) % batch_size == 0 {
-                        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                    }
-                }
+                println!("检测到 {} 张图片，已开始异步预加载", image_count);
             }
         });
     }
