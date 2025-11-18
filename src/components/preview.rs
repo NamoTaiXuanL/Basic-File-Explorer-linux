@@ -61,27 +61,23 @@ impl ThumbnailPreloader {
         // 启动20个预加载线程以提高并发性能
         let mut threads = Vec::new();
         
-        // 使用Arc包装接收器以便多个线程共享
-        let receiver_arc = Arc::new(Mutex::new(receiver));
-        
-        for _ in 0..20 {
-            let receiver_clone = receiver_arc.clone();
-            let cache_clone = cache.clone();
-            threads.push(thread::spawn(move || {
-                while let Ok(receiver_guard) = receiver_clone.lock() {
-                    if let Ok(image_path) = receiver_guard.recv() {
-                        if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
-                            let cache_key = image_path.to_string_lossy().to_string();
-                            let size = (thumbnail.width(), thumbnail.height());
-                            if let Ok(mut cache_guard) = cache_clone.lock() {
-                                // 缓存原始图像数据，纹理创建在主线程进行
-                                cache_guard.insert(cache_key, (thumbnail, size));
-                            }
+        // 使用工作队列模式：单个消费者线程分发任务到线程池
+        let cache_clone = cache.clone();
+        threads.push(thread::spawn(move || {
+            while let Ok(image_path) = receiver.recv() {
+                let cache_clone = cache_clone.clone();
+                thread::spawn(move || {
+                    if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
+                        let cache_key = image_path.to_string_lossy().to_string();
+                        let size = (thumbnail.width(), thumbnail.height());
+                        if let Ok(mut cache_guard) = cache_clone.lock() {
+                            // 缓存原始图像数据，纹理创建在主线程进行
+                            cache_guard.insert(cache_key, (thumbnail, size));
                         }
                     }
-                }
-            }));
-        }
+                });
+            }
+        }));
 
         Self {
             sender,
