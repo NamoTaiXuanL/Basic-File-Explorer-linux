@@ -159,9 +159,9 @@ impl FileExplorerApp {
             self.file_list.refresh(path.clone(), self.show_hidden);
             self.selected_file = None;
             self.preview.clear();
-            
-            // 异步预加载新文件夹中的图片（不阻塞UI操作）
-            self.async_preload_images();
+
+            // 请求延迟预加载，避免阻塞UI
+            self.preview.request_delayed_preload(&path);
         }
     }
 

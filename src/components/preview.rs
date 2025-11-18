@@ -11,6 +11,7 @@ use image::GenericImageView;
 
 pub struct Preview {
     current_file: Option<PathBuf>,
+    current_folder: Option<PathBuf>,  // 添加当前文件夹跟踪
     preview_content: String,
     file_info: FileInfo,
     image_texture: Option<egui::TextureHandle>,
@@ -27,6 +28,9 @@ pub struct Preview {
     // 异步文件夹预览
     folder_preview_sender: Option<Sender<String>>,
     folder_preview_receiver: Option<Receiver<String>>,
+    // 延迟预加载状态
+    preload_pending: bool,
+    pending_folder: Option<PathBuf>,
 }
 
 struct LoadingResult {
@@ -65,24 +69,45 @@ impl ThumbnailPreloader {
         let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
-        // 可配置的线程数量（4-16之间），减少线程数降低资源消耗
+        // 减少线程数量以降低资源消耗：2-8之间
         let thread_count = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(4, 16))
-            .unwrap_or(8);
+            .map(|n| n.get().clamp(2, 6))
+            .unwrap_or(4);
 
         let mut threads = Vec::new();
-        
+
         // 创建工作线程 - 每个线程独立处理接收到的消息
-        for _ in 0..thread_count {
+        for _thread_id in 0..thread_count {
             let receiver = receiver.clone(); // crossbeam Receiver 可以克隆
             let cache_clone = cache.clone();
             threads.push(thread::spawn(move || {
+                let mut processed_count = 0;
                 while let Ok(image_path) = receiver.recv() {
+                    // 添加缓存大小检查，防止内存过度使用
+                    if let Ok(mut cache_guard) = cache_clone.lock() {
+                        if cache_guard.len() > 200 { // 限制缓存大小
+                            // 清理一半最老的缓存项
+                            let keys_to_remove: Vec<_> = cache_guard.keys()
+                                .take(cache_guard.len() / 2)
+                                .cloned()
+                                .collect();
+                            for key in keys_to_remove {
+                                cache_guard.remove(&key);
+                            }
+                        }
+                    }
+
                     if let Ok(thumbnail) = Self::generate_thumbnail(&image_path) {
                         let cache_key = image_path.to_string_lossy().to_string();
                         let size = (thumbnail.width(), thumbnail.height());
                         if let Ok(mut cache_guard) = cache_clone.lock() {
                             cache_guard.insert(cache_key, (thumbnail, size));
+                        }
+
+                        processed_count += 1;
+                        // 每个线程处理50张图片后休息一下，避免过度占用CPU
+                        if processed_count % 50 == 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
                         }
                     }
                 }
@@ -114,6 +139,8 @@ impl ThumbnailPreloader {
 
     fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = path.to_string_lossy().to_string();
+
+        // 如果主缓存没有，检查预加载缓存
         if let Ok(cache_guard) = self.cache.lock() {
             if let Some((rgba_img, size)) = cache_guard.get(&cache_key) {
                 // 在主线程创建纹理
@@ -126,6 +153,7 @@ impl ThumbnailPreloader {
                     color_image,
                     egui::TextureOptions::default(),
                 );
+
                 Some((texture, *size))
             } else {
                 None
@@ -158,9 +186,10 @@ impl Preview {
     pub fn new() -> Self {
         // 创建异步文件夹预览通道
         let (folder_sender, folder_receiver) = crossbeam_channel::unbounded();
-        
+
         Self {
             current_file: None,
+            current_folder: None,  // 初始化当前文件夹跟踪
             preview_content: String::new(),
             file_info: FileInfo::default(),
             image_texture: None,
@@ -172,7 +201,16 @@ impl Preview {
             preloader: ThumbnailPreloader::new(), // 直接初始化预加载器
             folder_preview_sender: Some(folder_sender),
             folder_preview_receiver: Some(folder_receiver),
+            preload_pending: false,
+            pending_folder: None,
         }
+    }
+
+    // 请求延迟预加载文件夹中的图片
+    pub fn request_delayed_preload(&mut self, folder_path: &Path) {
+        self.preload_pending = true;
+        self.pending_folder = Some(folder_path.to_path_buf());
+        println!("请求延迟预加载: {:?}", folder_path);
     }
 
     // 初始化预加载器 (已废弃，预加载器现在总是初始化)
@@ -181,38 +219,55 @@ impl Preview {
         println!("预加载器已初始化");
     }
 
-    // 预加载文件夹中的所有图片
+    // 预加载文件夹中的所有图片 - 延迟启动版本
     pub fn preload_folder_images(&mut self, folder_path: &Path) {
+        // 检查是否是新文件夹，如果是则清理预加载缓存
+        if let Some(current_folder) = &self.current_folder {
+            if current_folder != folder_path {
+                println!("文件夹发生变化，清理预加载缓存");
+                self.clear_preloader_cache();
+            }
+        }
+
+        self.current_folder = Some(folder_path.to_path_buf());
         println!("开始预加载文件夹: {:?}", folder_path);
+
         let preloader_clone = self.preloader.sender.clone();
         let folder_path = folder_path.to_path_buf();
-        
-        // 在后台线程中执行文件系统操作，避免阻塞UI
+
+        // 延迟300ms启动预加载，让UI有时间响应
         thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+
             // 使用更高效的文件遍历方式，避免一次性读取所有文件
             if let Ok(entries) = fs::read_dir(&folder_path) {
                 let mut image_count = 0;
-                
-                // 直接发送图片路径，避免收集所有路径再发送
+                let mut paths = Vec::new();
+
+                // 先收集图片路径，避免在循环中发送
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    
+
                     // 快速检查文件扩展名，避免不必要的操作
                     if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
                         let ext_lower = ext.to_lowercase();
                         if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
-                            let _ = preloader_clone.send(path);
+                            paths.push(path);
                             image_count += 1;
-                            
-                            // 每处理10个文件添加短暂延迟，避免瞬间创建大量任务
-                            if image_count % 10 == 0 {
-                                std::thread::sleep(std::time::Duration::from_millis(20));
-                            }
                         }
                     }
                 }
-                
-                println!("检测到 {} 张图片，已开始异步预加载", image_count);
+
+                println!("检测到 {} 张图片，开始延迟预加载", image_count);
+
+                // 批量发送图片路径，减少通道压力
+                for path in paths {
+                    let _ = preloader_clone.send(path);
+                    // 减少发送频率，避免瞬间大量任务
+                    std::thread::sleep(std::time::Duration::from_millis(3));
+                }
+
+                println!("预加载任务已全部发送");
             }
         });
     }
@@ -240,6 +295,15 @@ impl Preview {
         self.texture_cache.clear();
         // 重新初始化预加载器以保持可用性
         self.preloader = ThumbnailPreloader::new();
+    }
+
+    // 清理预加载缓存，用于切换文件夹时重置状态
+    pub fn clear_preloader_cache(&mut self) {
+        // 清理预加载缓存
+        if let Ok(mut cache_guard) = self.preloader.cache.lock() {
+            cache_guard.clear();
+        }
+        println!("已清理预加载缓存，为新文件夹做准备");
     }
 
     pub fn load_preview(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -357,12 +421,21 @@ impl Preview {
         self.file_info.modified = "计算中...".to_string();
     }
 
-    // 在每帧更新时调用，用于处理异步加载结果
+    // 在每帧更新时调用，用于处理异步加载结果和延迟预加载
     pub fn update(&mut self, ctx: &egui::Context) {
         // 首先处理文件夹预览通道
         if let Some(receiver) = &self.folder_preview_receiver {
             while let Ok(preview_content) = receiver.try_recv() {
                 self.preview_content = preview_content;
+            }
+        }
+
+        // 处理延迟预加载请求
+        if self.preload_pending {
+            self.preload_pending = false;
+            if let Some(folder_path) = self.pending_folder.take() {
+                println!("开始延迟预加载: {:?}", folder_path);
+                self.preload_folder_images(&folder_path);
             }
         }
 
