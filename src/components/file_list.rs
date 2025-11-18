@@ -360,9 +360,26 @@ impl FileList {
                 (16.0, 50.0, (available_width / 60.0).max(1.0) as usize)
             };
 
+            // 获取滚动区域的可见区域
+            let scroll_area_rect = ui.max_rect();
+            let visible_min_y = scroll_area_rect.min.y;
+            let visible_max_y = scroll_area_rect.max.y;
+
+            // 计算可见范围内的项目
+            let items_per_row = columns;
+            let row_height = item_size + 4.0; // 包括间距
+            
+            // 计算可见行范围
+            let start_row = ((visible_min_y - ui.cursor().top()) / row_height).floor().max(0.0) as usize;
+            let end_row = ((visible_max_y - ui.cursor().top()) / row_height).ceil() as usize + 1; // +1 作为缓冲
+            
+            let start_index = start_row * items_per_row;
+            let end_index = (end_row * items_per_row).min(self.files.len());
+
             // 网格布局
             ui.horizontal_wrapped(|ui| {
-                for (i, file) in self.files.iter().enumerate() {
+                for i in start_index..end_index {
+                    let file = &self.files[i];
                     let is_selected = selected_file.as_ref().map_or(false, |p| p == &file.path);
 
                     ui.add_space(4.0);
@@ -540,7 +557,7 @@ impl FileList {
                     }
 
                     // 每行显示指定数量的项目后换行
-                    if (i + 1) % columns == 0 {
+                    if ((i - start_index + 1) % columns == 0) {
                         ui.end_row();
                     }
                 }

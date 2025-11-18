@@ -65,10 +65,10 @@ impl ThumbnailPreloader {
         let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
 
-        // 可配置的线程数量（8-32之间），增加线程数提高预加载速度
+        // 可配置的线程数量（4-16之间），减少线程数降低资源消耗
         let thread_count = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(8, 32))
-            .unwrap_or(16);
+            .map(|n| n.get().clamp(4, 16))
+            .unwrap_or(8);
 
         let mut threads = Vec::new();
         
@@ -192,48 +192,30 @@ impl Preview {
             // 使用更高效的文件遍历方式，避免一次性读取所有文件
             if let Ok(entries) = fs::read_dir(&folder_path) {
                 let mut image_paths = Vec::new();
-                let mut image_count = 0;
                 
-                // 先收集所有图片路径，不立即发送
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        let path = entry.path();
-                        
-                        // 快速检查文件扩展名，避免不必要的操作
-                        if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
-                            let ext_lower = ext.to_lowercase();
-                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
-                                image_paths.push(path);
-                                image_count += 1;
-                            }
+                // 先收集所有图片路径
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    
+                    // 快速检查文件扩展名，避免不必要的操作
+                    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+                        let ext_lower = ext.to_lowercase();
+                        if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp") {
+                            image_paths.push(path);
                         }
                     }
                 }
                 
-                // 调试信息：显示检测到的图片数量
-                println!("检测到 {} 张图片，开始渐进式预加载", image_count);
+                println!("检测到 {} 张图片，开始分批异步预加载", image_paths.len());
                 
-                // 智能渐进式发送：根据图片数量动态调整预加载策略
-                let total_images = image_paths.len();
-                
-                // 动态调整批处理大小：图片越多，批处理越小，延迟越长
-                let (batch_size, delay_ms) = if total_images > 500 {
-                    (4, 200) // 大量图片：小批次，长延迟
-                } else if total_images > 200 {
-                    (6, 150) // 中等数量：中等批次，中等延迟
-                } else if total_images > 50 {
-                    (8, 100) // 较少图片：正常批次，短延迟
-                } else {
-                    (12, 50)  // 少量图片：大批次，很短延迟
-                };
-                
-                println!("使用智能预加载策略: {}张图片, 批次大小={}, 延迟={}ms", 
-                    total_images, batch_size, delay_ms);
+                // 分批发送预加载任务，避免瞬间创建大量线程
+                let batch_size = 10; // 每批发送10个任务
+                let delay_ms = 50;   // 每批之间延迟50毫秒
                 
                 for (i, path) in image_paths.into_iter().enumerate() {
                     let _ = preloader_clone.send(path);
                     
-                    // 每处理完一批，稍微延迟一下，避免瞬间创建太多任务
+                    // 每批结束后添加延迟
                     if (i + 1) % batch_size == 0 {
                         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                     }
