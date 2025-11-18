@@ -86,15 +86,7 @@ impl ThumbnailPreloader {
         }
     }
 
-    fn preload_images(&self, paths: &[PathBuf]) {
-        for path in paths {
-            if let Ok(metadata) = fs::metadata(path) {
-                if metadata.len() < 10 * 1024 * 1024 { // 只预加载小于10MB的图片
-                    let _ = self.sender.send(path.clone());
-                }
-            }
-        }
-    }
+    // 文件大小检查现在在工作线程中进行，避免阻塞UI
 
     fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = path.to_string_lossy().to_string();
@@ -164,20 +156,29 @@ impl Preview {
     // 预加载文件夹中的所有图片
     pub fn preload_folder_images(&mut self, folder_path: &Path) {
         if let Some(preloader) = &self.preloader {
-            if let Ok(entries) = fs::read_dir(folder_path) {
-                let image_paths: Vec<PathBuf> = entries
-                    .filter_map(|entry| entry.ok())
-                    .map(|entry| entry.path())
-                    .filter(|path| {
-                        path.extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
-                            .unwrap_or(false)
-                    })
-                    .collect();
+            let preloader_clone = preloader.sender.clone();
+            let folder_path = folder_path.to_path_buf();
+            
+            // 在后台线程中执行文件系统操作，避免阻塞UI
+            thread::spawn(move || {
+                if let Ok(entries) = fs::read_dir(&folder_path) {
+                    let image_paths: Vec<PathBuf> = entries
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| entry.path())
+                        .filter(|path| {
+                            path.extension()
+                                .and_then(|ext| ext.to_str())
+                                .map(|ext| matches!(ext.to_lowercase().as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp"))
+                                .unwrap_or(false)
+                        })
+                        .collect();
 
-                preloader.preload_images(&image_paths);
-            }
+                    // 发送图片路径到预加载器
+                    for path in image_paths {
+                        let _ = preloader_clone.send(path);
+                    }
+                }
+            });
         }
     }
 
