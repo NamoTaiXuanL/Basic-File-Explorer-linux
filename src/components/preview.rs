@@ -10,6 +10,13 @@ use crate::utils;
 use image::GenericImageView;
 use sysinfo::System;
 
+// 缓存的纹理结构
+#[derive(Clone)]
+struct CachedTexture {
+    texture: egui::TextureHandle,
+    size: (u32, u32),
+}
+
 // 计算基于内存的动态缓存大小
 fn calculate_cache_sizes() -> (usize, usize) {
     let mut system = System::new_all();
@@ -100,6 +107,7 @@ struct FileInfo {
 struct ThumbnailPreloader {
     sender: Sender<PathBuf>,
     cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
+    texture_cache: Arc<Mutex<HashMap<String, CachedTexture>>>,
     threads: Vec<thread::JoinHandle<()>>,
     stop_signal: Arc<atomic::AtomicBool>,
     thread_count: usize,
@@ -110,6 +118,7 @@ impl ThumbnailPreloader {
     fn new() -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded::<PathBuf>();
         let cache = Arc::new(Mutex::new(HashMap::new()));
+        let texture_cache = Arc::new(Mutex::new(HashMap::new()));
 
         // 计算动态缓存大小
         let (preload_cache_size, _) = calculate_cache_sizes();
@@ -174,6 +183,7 @@ impl ThumbnailPreloader {
         Self {
             sender,
             cache,
+            texture_cache,
             threads,
             stop_signal: Arc::new(atomic::AtomicBool::new(false)),
             thread_count,
@@ -198,7 +208,14 @@ impl ThumbnailPreloader {
     fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = path.to_string_lossy().to_string();
 
-        // 如果主缓存没有，检查预加载缓存
+        // 检查纹理缓存
+        if let Ok(texture_cache_guard) = self.texture_cache.lock() {
+            if let Some(cached_texture) = texture_cache_guard.get(&cache_key) {
+                return Some((cached_texture.texture.clone(), cached_texture.size));
+            }
+        }
+
+        // 如果纹理缓存没有，检查预加载缓存
         if let Ok(cache_guard) = self.cache.lock() {
             if let Some((rgba_img, size)) = cache_guard.get(&cache_key) {
                 // 在主线程创建纹理
@@ -211,6 +228,14 @@ impl ThumbnailPreloader {
                     color_image,
                     egui::TextureOptions::default(),
                 );
+                
+                // 缓存纹理避免重复创建
+                if let Ok(mut texture_cache_guard) = self.texture_cache.lock() {
+                    texture_cache_guard.insert(cache_key, CachedTexture {
+                        texture: texture.clone(),
+                        size: *size,
+                    });
+                }
                 
                 Some((texture, *size))
             } else {
@@ -789,8 +814,9 @@ impl Preview {
                         ui.separator();
                         ui.heading("图片预览");
                         
-                        // 竖向图片流 - 简化实现
-                        for (index, image_path) in self.image_stream_paths.iter().enumerate() {
+                        // 竖向图片流 - 限制显示数量避免卡顿
+                        let max_images_to_show = 20; // 最多显示20张图片
+                        for (index, image_path) in self.image_stream_paths.iter().enumerate().take(max_images_to_show) {
                             if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
                                 let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
                                 // 限制图片宽度为200px，保持比例
@@ -823,6 +849,11 @@ impl Preview {
                                     }
                                 }
                             }
+                        }
+                        
+                        // 如果图片数量超过限制，显示提示信息
+                        if self.image_stream_paths.len() > max_images_to_show {
+                            ui.label(format!("还有 {} 张图片...", self.image_stream_paths.len() - max_images_to_show));
                         }
                     }
                 } else {
