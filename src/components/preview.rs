@@ -59,6 +59,9 @@ pub struct Preview {
     // 异步文件夹预览
     folder_preview_sender: Option<Sender<String>>,
     folder_preview_receiver: Option<Receiver<String>>,
+    // 文件信息通道
+    file_info_sender: Option<Sender<FileInfo>>,
+    file_info_receiver: Option<Receiver<FileInfo>>,
     // 延迟预加载状态
     preload_pending: bool,
     pending_folder: Option<PathBuf>,
@@ -236,6 +239,9 @@ impl Preview {
     pub fn new() -> Self {
         // 创建异步文件夹预览通道
         let (folder_sender, folder_receiver) = crossbeam_channel::unbounded();
+        
+        // 创建文件信息通道
+        let (file_info_sender, file_info_receiver) = crossbeam_channel::unbounded();
 
         // 计算动态缓存大小
         let (_, main_cache_size) = calculate_cache_sizes();
@@ -254,6 +260,8 @@ impl Preview {
             preloader: ThumbnailPreloader::new(), // 直接初始化预加载器
             folder_preview_sender: Some(folder_sender),
             folder_preview_receiver: Some(folder_receiver),
+            file_info_sender: Some(file_info_sender),
+            file_info_receiver: Some(file_info_receiver),
             preload_pending: false,
             pending_folder: None,
             max_main_cache_size: main_cache_size,
@@ -456,6 +464,8 @@ impl Preview {
 
         // 异步获取文件信息（避免阻塞UI）
         let path_clone = path.clone();
+        let file_info_sender = self.file_info_sender.clone();
+        
         std::thread::spawn(move || {
             let mut file_info = FileInfo::default();
             if let Ok(metadata) = fs::metadata(&path_clone) {
@@ -472,8 +482,10 @@ impl Preview {
                     .unwrap_or_else(|| "文件".to_string())
             };
             
-            // 通过通道发送文件信息（需要在Preview结构体中添加接收器）
-            // 暂时先不实现，避免复杂化
+            // 通过通道发送文件信息
+            if let Some(sender) = file_info_sender {
+                let _ = sender.send(file_info);
+            }
         });
         
         // 临时设置基本信息（避免UI卡顿）
@@ -488,6 +500,13 @@ impl Preview {
         if let Some(receiver) = &self.folder_preview_receiver {
             while let Ok(preview_content) = receiver.try_recv() {
                 self.preview_content = preview_content;
+            }
+        }
+
+        // 处理文件信息通道
+        if let Some(receiver) = &self.file_info_receiver {
+            while let Ok(file_info) = receiver.try_recv() {
+                self.file_info = file_info;
             }
         }
 
