@@ -57,8 +57,8 @@ pub struct Preview {
     // 多线程预加载 - 直接包含，不再使用Option
     preloader: ThumbnailPreloader,
     // 异步文件夹预览
-    folder_preview_sender: Option<Sender<String>>,
-    folder_preview_receiver: Option<Receiver<String>>,
+    folder_preview_sender: Option<Sender<(String, Vec<PathBuf>)>>,
+    folder_preview_receiver: Option<Receiver<(String, Vec<PathBuf>)>>,
     // 文件信息通道
     file_info_sender: Option<Sender<FileInfo>>,
     file_info_receiver: Option<Receiver<FileInfo>>,
@@ -67,6 +67,11 @@ pub struct Preview {
     pending_folder: Option<PathBuf>,
     // 动态缓存大小限制
     max_main_cache_size: usize,
+    // 图片流预览状态
+    image_stream_scroll: f32,
+    image_stream_paths: Vec<PathBuf>,
+    selected_image_index: Option<usize>,
+    pending_image_load: Option<PathBuf>,
 }
 
 struct LoadingResult {
@@ -265,6 +270,11 @@ impl Preview {
             preload_pending: false,
             pending_folder: None,
             max_main_cache_size: main_cache_size,
+            // 图片流预览状态初始化
+            image_stream_scroll: 0.0,
+            image_stream_paths: Vec::new(),
+            selected_image_index: None,
+            pending_image_load: None,
         }
     }
 
@@ -498,8 +508,9 @@ impl Preview {
     pub fn update(&mut self, ctx: &egui::Context) {
         // 首先处理文件夹预览通道
         if let Some(receiver) = &self.folder_preview_receiver {
-            while let Ok(preview_content) = receiver.try_recv() {
+            while let Ok((preview_content, image_paths)) = receiver.try_recv() {
                 self.preview_content = preview_content;
+                self.image_stream_paths = image_paths;
             }
         }
 
@@ -508,6 +519,11 @@ impl Preview {
             while let Ok(file_info) = receiver.try_recv() {
                 self.file_info = file_info;
             }
+        }
+
+        // 处理图片加载请求
+        if let Some(image_path) = self.pending_image_load.take() {
+            self.load_preview(image_path, ctx);
         }
 
         // 处理延迟预加载请求
@@ -624,6 +640,7 @@ impl Preview {
             std::thread::spawn(move || {
                 let mut folders = Vec::new();
                 let mut files = Vec::new();
+                let mut image_paths = Vec::new();
                 
                 // 在后台线程中执行文件系统操作
                 if let Ok(entries) = fs::read_dir(&path) {
@@ -640,6 +657,15 @@ impl Preview {
                             folders.push(name);
                         } else {
                             files.push(name);
+                            // 检查是否为图片文件
+                            if let Some(ext) = entry_path.extension() {
+                                if let Some(ext_str) = ext.to_str() {
+                                    let ext_lower = ext_str.to_lowercase();
+                                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp") {
+                                        image_paths.push(entry_path);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -663,7 +689,7 @@ impl Preview {
                 };
                 
                 // 通过通道发送预览内容回主线程
-                let _ = sender.send(preview_content);
+                let _ = sender.send((preview_content, image_paths));
             });
         }
     }
@@ -694,7 +720,8 @@ impl Preview {
 
     
     pub fn show(&mut self, ui: &mut egui::Ui) {
-        if let Some(path) = &self.current_file {
+        let current_file_clone = self.current_file.clone();
+        if let Some(path) = &current_file_clone {
             ui.vertical(|ui| {
                 // 文件信息
                 ui.group(|ui| {
@@ -756,6 +783,51 @@ impl Preview {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.monospace(&self.preview_content);
                     });
+                    
+                    // 显示图片流预览（如果有图片）
+                    if !self.image_stream_paths.is_empty() {
+                        ui.separator();
+                        ui.heading("图片预览");
+                        
+                        // 水平滚动的图片流
+                        egui::ScrollArea::horizontal().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (index, image_path) in self.image_stream_paths.iter().enumerate() {
+                                    if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
+                                        let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
+                                        // 限制图片大小为200px
+                                        let max_size = 200.0;
+                                        let scale = (max_size / image_size.x).min(max_size / image_size.y).min(1.0);
+                                        image_size *= scale;
+                                        
+                                        if image_size.x > 0.0 && image_size.y > 0.0 {
+                                            let response = ui.add(
+                                                egui::Image::from_texture(egui::load::SizedTexture::new(
+                                                    texture.id(),
+                                                    image_size,
+                                                ))
+                                            );
+                                            
+                                            // 点击图片预览
+                                            if response.clicked() {
+                                                // 记录点击的图片路径，在update方法中处理
+                                                self.selected_image_index = Some(index);
+                                                self.current_file = Some(image_path.clone());
+                                                self.pending_image_load = Some(image_path.clone());
+                                            }
+                                            
+                                            // 鼠标悬停显示文件名
+                                            if response.hovered() {
+                                                if let Some(file_name) = image_path.file_name() {
+                                                    response.on_hover_text(file_name.to_string_lossy());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                    }
                 } else {
                     ui.label("无预览内容");
                 }
