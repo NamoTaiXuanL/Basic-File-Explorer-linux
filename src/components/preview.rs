@@ -789,55 +789,41 @@ impl Preview {
                         ui.separator();
                         ui.heading("图片预览");
                         
-                        // 水平滚动的图片流
-                        let scroll_response = egui::ScrollArea::horizontal()
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    // 只显示前20张图片以避免性能问题
-                                    let max_images_to_show = 20;
-                                    for (index, image_path) in self.image_stream_paths.iter().enumerate().take(max_images_to_show) {
-                                        if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
-                                            let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
-                                            // 限制图片大小为200px
-                                            let max_size = 200.0;
-                                            let scale = (max_size / image_size.x).min(max_size / image_size.y).min(1.0);
-                                            image_size *= scale;
-                                            
-                                            if image_size.x > 0.0 && image_size.y > 0.0 {
-                                                let response = ui.add(
-                                                    egui::Image::from_texture(egui::load::SizedTexture::new(
-                                                        texture.id(),
-                                                        image_size,
-                                                    ))
-                                                );
-                                                
-                                                // 点击图片预览
-                                                if response.clicked() {
-                                                    // 记录点击的图片路径，在update方法中处理
-                                                    self.selected_image_index = Some(index);
-                                                    self.current_file = Some(image_path.clone());
-                                                    self.pending_image_load = Some(image_path.clone());
-                                                }
-                                                
-                                                // 鼠标悬停显示文件名
-                                                if response.hovered() {
-                                                    if let Some(file_name) = image_path.file_name() {
-                                                        response.on_hover_text(file_name.to_string_lossy());
-                                                    }
-                                                }
-                                            }
-                                        }
+                        // 竖向图片流 - 简化实现
+                        for (index, image_path) in self.image_stream_paths.iter().enumerate() {
+                            if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
+                                let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
+                                // 限制图片宽度为200px，保持比例
+                                let max_width = 200.0;
+                                if image_size.x > max_width {
+                                    let scale = max_width / image_size.x;
+                                    image_size *= scale;
+                                }
+                                
+                                if image_size.x > 0.0 && image_size.y > 0.0 {
+                                    let response = ui.add(
+                                        egui::Image::from_texture(egui::load::SizedTexture::new(
+                                            texture.id(),
+                                            image_size,
+                                        ))
+                                    );
+                                    
+                                    // 点击图片预览
+                                    if response.clicked() {
+                                        self.selected_image_index = Some(index);
+                                        self.current_file = Some(image_path.clone());
+                                        self.pending_image_load = Some(image_path.clone());
                                     }
                                     
-                                    // 如果图片数量超过限制，显示提示信息
-                                    if self.image_stream_paths.len() > max_images_to_show {
-                                        ui.label(format!("还有 {} 张图片...", self.image_stream_paths.len() - max_images_to_show));
+                                    // 鼠标悬停显示文件名
+                                    if response.hovered() {
+                                        if let Some(file_name) = image_path.file_name() {
+                                            response.on_hover_text(file_name.to_string_lossy());
+                                        }
                                     }
-                                });
-                            });
-                        
-                        // 处理滚动事件 - 直接更新滚动位置
-                        self.image_stream_scroll = scroll_response.state.offset.x;
+                                }
+                            }
+                        }
                     }
                 } else {
                     ui.label("无预览内容");
