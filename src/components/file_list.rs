@@ -74,23 +74,14 @@ impl FileList {
 
                 // 使用轻量级文件类型检测，避免metadata()调用
                 let is_dir = entry_path.is_dir();
-                let size = if is_dir {
-                    0 // 文件夹大小设为0，避免阻塞
-                } else {
-                    // 对于文件，延迟加载大小信息
-                    match fs::metadata(&entry_path) {
-                        Ok(metadata) => metadata.len(),
-                        Err(_) => 0,
-                    }
+                let size = match fs::metadata(&entry_path) {
+                    Ok(metadata) => metadata.len(),
+                    Err(_) => 0,
                 };
                 
                 // 修改时间也延迟加载
-                let modified = if is_dir {
-                    "-".to_string() // 文件夹显示-
-                } else {
-                    utils::get_file_modified_time(&entry_path)
-                        .unwrap_or_else(|| "未知时间".to_string())
-                };
+                let modified = utils::get_file_modified_time(&entry_path)
+                    .unwrap_or_else(|| "未知时间".to_string());
 
                 self.files.push(FileItem {
                     path: entry_path,
@@ -326,7 +317,7 @@ impl FileList {
                 painter.with_clip_rect(type_rect).text(egui::pos2(type_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, file_type, font_id.clone(), color);
                 x += type_w;
                 let size_rect = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + size_w, rect.bottom()));
-                let size_text = if file.is_dir { "—".to_string() } else { utils::get_file_size_str(file.size) };
+                let size_text = utils::get_file_size_str(file.size);
                 painter.with_clip_rect(size_rect).text(egui::pos2(size_rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, size_text, font_id.clone(), color);
 
                 let button_response = response;
