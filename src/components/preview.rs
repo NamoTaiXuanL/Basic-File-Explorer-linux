@@ -749,31 +749,22 @@ impl Preview {
         let folder_path = folder_path.to_path_buf();
         let preloader_sender = self.preloader.sender.clone();
         
-        // 创建高优先级线程专门处理当前文件夹
-        std::thread::Builder::new()
-            .name("high_priority_preload".to_string())
-            .spawn(move || {
-                println!("高优先级预加载线程启动: {:?}", folder_path);
-                
-                if let Ok(entries) = fs::read_dir(&folder_path) {
-                    let mut count = 0;
-                    for entry in entries.flatten().take(50) { // 限制数量，优先处理
-                        let path = entry.path();
-                        if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
-                            let ext_lower = ext.to_lowercase();
-                            if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp") {
-                                // 立即发送到预加载器，高优先级
-                                let _ = preloader_sender.send(path);
-                                count += 1;
-                            }
-                        }
+        // 直接在当前线程中处理，确保立即执行
+        if let Ok(entries) = fs::read_dir(&folder_path) {
+            let mut count = 0;
+            for entry in entries.flatten().take(20) { // 限制数量，优先处理前20个
+                let path = entry.path();
+                if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp") {
+                        // 立即发送到预加载器
+                        let _ = preloader_sender.send(path);
+                        count += 1;
                     }
-                    println!("高优先级线程发送了 {} 个图片任务", count);
-                } else {
-                    println!("高优先级线程无法读取文件夹: {:?}", folder_path);
                 }
-            })
-            .unwrap(); // 确保线程启动
+            }
+            println!("立即预加载了 {} 个图片", count);
+        }
     }
 
     fn generate_text_preview(&mut self, path: &Path) {
