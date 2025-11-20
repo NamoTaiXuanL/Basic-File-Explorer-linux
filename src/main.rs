@@ -104,6 +104,9 @@ struct FileExplorerApp {
     show_new_folder_dialog: bool,
     new_folder_name: String,
     view_mode: components::file_list::ViewMode,
+    // 查看菜单选项状态
+    show_drive_capacity: bool,
+    show_capacity_size: bool,
 }
 
 impl FileExplorerApp {
@@ -150,6 +153,9 @@ impl FileExplorerApp {
             show_new_folder_dialog: false,
             new_folder_name: String::new(),
             view_mode: components::file_list::ViewMode::Details,
+            // 查看菜单选项状态初始化
+            show_drive_capacity: false,
+            show_capacity_size: false,
         }
     }
 
@@ -269,7 +275,7 @@ impl eframe::App for FileExplorerApp {
             ui.vertical(|ui| {
                 // 菜单栏
                 let (menu_needs_refresh, menu_should_paste, menu_should_rename, menu_should_delete, menu_should_create_folder) =
-                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system, &mut self.view_mode);
+                    menu_bar::show_menu_bar(ui, &mut self.current_path, &mut self.show_hidden, &mut self.file_operations, &self.selected_file, &mut self.help_system, &mut self.view_mode, &mut self.show_drive_capacity, &mut self.show_capacity_size);
 
                 // 处理菜单栏的刷新请求（来自查看和转到功能）
                 if menu_needs_refresh {

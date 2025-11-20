@@ -13,6 +13,8 @@ pub fn show_menu_bar(
     selected_file: &Option<PathBuf>,
     help_system: &mut HelpSystem,
     view_mode: &mut super::file_list::ViewMode,
+    show_drive_capacity: &mut bool,
+    show_capacity_size: &mut bool,
 ) -> (bool, bool, bool, bool, bool) {
     let mut needs_refresh = false;
     let mut should_paste = false;
@@ -106,6 +108,13 @@ pub fn show_menu_bar(
             }
             if ui.button("小图标").clicked() {
                 *view_mode = super::file_list::ViewMode::SmallIcons;
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui.checkbox(show_drive_capacity, "硬盘容量").changed() {
+                ui.close_menu();
+            }
+            if ui.checkbox(show_capacity_size, "容量大小").changed() {
                 ui.close_menu();
             }
         });
