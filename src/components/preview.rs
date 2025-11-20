@@ -362,10 +362,8 @@ impl Preview {
         let preloader_clone = self.preloader.sender.clone();
         let folder_path = folder_path.to_path_buf();
 
-        // 延迟300ms启动预加载，让UI有时间响应
+        // 立即启动预加载，移除延迟
         thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-
             // 使用更高效的文件遍历方式，避免一次性读取所有文件
             if let Ok(entries) = fs::read_dir(&folder_path) {
                 let mut image_count = 0;
@@ -385,13 +383,13 @@ impl Preview {
                     }
                 }
 
-                println!("检测到 {} 张图片，开始延迟预加载", image_count);
+                println!("检测到 {} 张图片，立即开始预加载", image_count);
 
                 // 批量发送图片路径，减少通道压力
                 for path in paths {
                     let _ = preloader_clone.send(path);
                     // 减少发送频率，避免瞬间大量任务
-                    std::thread::sleep(std::time::Duration::from_millis(3));
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                 }
 
                 println!("预加载任务已全部发送");
@@ -680,6 +678,7 @@ impl Preview {
         
         // 克隆路径和发送器用于异步操作
         let path = path.to_path_buf();
+        let preloader_sender = self.preloader.sender.clone();
         if let Some(sender) = self.folder_preview_sender.clone() {
             
             // 在后台线程中读取文件夹内容
@@ -708,7 +707,9 @@ impl Preview {
                                 if let Some(ext_str) = ext.to_str() {
                                     let ext_lower = ext_str.to_lowercase();
                                     if matches!(ext_lower.as_str(), "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp") {
-                                        image_paths.push(entry_path);
+                                        image_paths.push(entry_path.clone());
+                                        // 立即发送到预加载器，不等待
+                                        let _ = preloader_sender.send(entry_path);
                                     }
                                 }
                             }
@@ -843,6 +844,8 @@ impl Preview {
                         
                         if cached_count < total_count {
                             ui.label(format!("正在加载图片: {}/{} 已缓存", cached_count, total_count));
+                            // 强制请求重绘，确保加载状态及时更新
+                            ui.ctx().request_repaint();
                         }
                         
                         // 竖向图片流 - 限制显示数量避免卡顿
@@ -892,8 +895,13 @@ impl Preview {
                                     }
                                 });
                                 
-                                // 触发异步加载
-                                let _ = self.preloader.sender.send(image_path.clone());
+                                // 触发异步加载（确保只发送一次）
+                                let cache_key = image_path.to_string_lossy().to_string();
+                                if let Ok(cache_guard) = self.preloader.cache.lock() {
+                                    if !cache_guard.contains_key(&cache_key) {
+                                        let _ = self.preloader.sender.send(image_path.clone());
+                                    }
+                                }
                             }
                         }
                         
