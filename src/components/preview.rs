@@ -246,6 +246,27 @@ impl ThumbnailPreloader {
         }
     }
 
+    // 检查图片是否已缓存
+    fn is_cached(&self, path: &Path) -> bool {
+        let cache_key = path.to_string_lossy().to_string();
+        
+        // 检查纹理缓存
+        if let Ok(texture_cache_guard) = self.texture_cache.lock() {
+            if texture_cache_guard.contains_key(&cache_key) {
+                return true;
+            }
+        }
+        
+        // 检查预加载缓存
+        if let Ok(cache_guard) = self.cache.lock() {
+            if cache_guard.contains_key(&cache_key) {
+                return true;
+            }
+        }
+        
+        false
+    }
+
     fn generate_thumbnail(path: &Path) -> Result<image::RgbaImage, Box<dyn std::error::Error>> {
         let img = image::open(path)?;
 
@@ -814,40 +835,65 @@ impl Preview {
                         ui.separator();
                         ui.heading("图片预览");
                         
+                        // 显示加载状态和进度
+                        let cached_count = self.image_stream_paths.iter()
+                            .filter(|path| self.preloader.is_cached(path))
+                            .count();
+                        let total_count = self.image_stream_paths.len();
+                        
+                        if cached_count < total_count {
+                            ui.label(format!("正在加载图片: {}/{} 已缓存", cached_count, total_count));
+                        }
+                        
                         // 竖向图片流 - 限制显示数量避免卡顿
                         let max_images_to_show = 20; // 最多显示20张图片
                         for (index, image_path) in self.image_stream_paths.iter().enumerate().take(max_images_to_show) {
-                            if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
-                                let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
-                                // 限制图片宽度为200px，保持比例
-                                let max_width = 200.0;
-                                if image_size.x > max_width {
-                                    let scale = max_width / image_size.x;
-                                    image_size *= scale;
-                                }
-                                
-                                if image_size.x > 0.0 && image_size.y > 0.0 {
-                                    let response = ui.add(
-                                        egui::Image::from_texture(egui::load::SizedTexture::new(
-                                            texture.id(),
-                                            image_size,
-                                        ))
-                                    );
-                                    
-                                    // 点击图片预览
-                                    if response.clicked() {
-                                        self.selected_image_index = Some(index);
-                                        self.current_file = Some(image_path.clone());
-                                        self.pending_image_load = Some(image_path.clone());
+                            // 检查图片是否已缓存
+                            if self.preloader.is_cached(image_path) {
+                                if let Some((texture, size)) = self.preloader.get_cached_thumbnail(image_path, ui.ctx()) {
+                                    let mut image_size = egui::vec2(size.0 as f32, size.1 as f32);
+                                    // 限制图片宽度为200px，保持比例
+                                    let max_width = 200.0;
+                                    if image_size.x > max_width {
+                                        let scale = max_width / image_size.x;
+                                        image_size *= scale;
                                     }
                                     
-                                    // 鼠标悬停显示文件名
-                                    if response.hovered() {
-                                        if let Some(file_name) = image_path.file_name() {
-                                            response.on_hover_text(file_name.to_string_lossy());
+                                    if image_size.x > 0.0 && image_size.y > 0.0 {
+                                        let response = ui.add(
+                                            egui::Image::from_texture(egui::load::SizedTexture::new(
+                                                texture.id(),
+                                                image_size,
+                                            ))
+                                        );
+                                        
+                                        // 点击图片预览
+                                        if response.clicked() {
+                                            self.selected_image_index = Some(index);
+                                            self.current_file = Some(image_path.clone());
+                                            self.pending_image_load = Some(image_path.clone());
+                                        }
+                                        
+                                        // 鼠标悬停显示文件名
+                                        if response.hovered() {
+                                            if let Some(file_name) = image_path.file_name() {
+                                                response.on_hover_text(file_name.to_string_lossy());
+                                            }
                                         }
                                     }
                                 }
+                            } else {
+                                // 显示占位符和加载状态
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label("加载中...");
+                                    if let Some(file_name) = image_path.file_name() {
+                                        ui.label(file_name.to_string_lossy());
+                                    }
+                                });
+                                
+                                // 触发异步加载
+                                let _ = self.preloader.sender.send(image_path.clone());
                             }
                         }
                         
