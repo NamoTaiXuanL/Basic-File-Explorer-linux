@@ -41,29 +41,35 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     // 设置字体以支持中文显示
     let mut fonts = egui::FontDefinitions::default();
 
-    // 尝试加载系统中文字体 - 使用更通用的方法
-    if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
-        // 微软雅黑
-        fonts.font_data.insert("microsoft_yahei".to_owned(), egui::FontData::from_owned(font_data));
+    // 根据操作系统选择字体路径
+    if cfg!(target_os = "windows") {
+        // Windows系统字体
+        if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/msyh.ttc") {
+            fonts.font_data.insert("microsoft_yahei".to_owned(), egui::FontData::from_owned(font_data));
+            fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "microsoft_yahei".to_owned());
+            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "microsoft_yahei".to_owned());
+        } else if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/simhei.ttf") {
+            fonts.font_data.insert("simhei".to_owned(), egui::FontData::from_owned(font_data));
+            fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "simhei".to_owned());
+            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "simhei".to_owned());
+        }
+    } else if cfg!(target_os = "linux") {
+        // Linux系统字体
+        let linux_fonts = vec![
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/arphic/uming.ttc",
+            "/usr/share/fonts/truetype/arphic/ukai.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        ];
 
-        // 将中文字体添加到所有字体族
-        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "microsoft_yahei".to_owned());
-        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "microsoft_yahei".to_owned());
-    } else if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/simhei.ttf") {
-        // 黑体
-        fonts.font_data.insert("simhei".to_owned(), egui::FontData::from_owned(font_data));
-
-        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "simhei".to_owned());
-        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "simhei".to_owned());
-    } else if let Ok(font_data) = std::fs::read("C:/Windows/Fonts/simsun.ttc") {
-        // 宋体
-        fonts.font_data.insert("simsun".to_owned(), egui::FontData::from_owned(font_data));
-
-        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "simsun".to_owned());
-        fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "simsun".to_owned());
-    } else {
-        // 如果都找不到，尝试使用默认字体的备用方案
-        eprintln!("警告: 未找到中文字体，中文可能显示为方块");
+        for font_path in linux_fonts {
+            if let Ok(font_data) = std::fs::read(font_path) {
+                fonts.font_data.insert("linux_chinese".to_owned(), egui::FontData::from_owned(font_data));
+                fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "linux_chinese".to_owned());
+                fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "linux_chinese".to_owned());
+                break;
+            }
+        }
     }
 
     ctx.set_fonts(fonts);
