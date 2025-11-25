@@ -74,9 +74,18 @@ impl DriveBar {
             workspace_cache_file,
         };
 
-        // 尝试加载缓存，如果失败则刷新
-        if !drive_bar.load_from_cache() {
-            drive_bar.refresh_drives();
+        // 尝试加载缓存，但总是检查是否有新盘符
+        let cache_loaded = drive_bar.load_from_cache();
+
+        // 无论缓存是否加载成功，都检查是否有新的挂载点
+        let current_drives = Self::get_system_drives();
+
+        if !cache_loaded || drive_bar.has_new_drives(&current_drives) {
+            // 发现新盘符或缓存失效，更新盘符列表
+            drive_bar.drives = current_drives;
+            drive_bar.save_to_cache();
+        } else {
+            // 缓存仍然有效，使用缓存的盘符
         }
 
         // 加载工作区状态
@@ -127,6 +136,26 @@ impl DriveBar {
         false
     }
 
+    fn has_new_drives(&self, current_drives: &[DriveInfo]) -> bool {
+        // 如果数量不同，肯定有新盘符
+        if self.drives.len() != current_drives.len() {
+            return true;
+        }
+
+        // 检查路径是否相同
+        let current_paths: std::collections::HashSet<_> = current_drives
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+
+        let cached_paths: std::collections::HashSet<_> = self.drives
+            .iter()
+            .map(|d| d.path.clone())
+            .collect();
+
+        current_paths != cached_paths
+    }
+
     fn save_to_cache(&self) {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -167,68 +196,92 @@ impl DriveBar {
         // Linux系统获取挂载点
         #[cfg(target_os = "linux")]
         {
-            // 系统挂载点
-            let system_mounts = vec!["/", "/home", "/boot", "/boot/efi"];
-            for mount in system_mounts {
-                let drive_path = PathBuf::from(mount);
-                if drive_path.exists() {
-                    let drive_info = DriveInfo {
-                        letter: match mount {
-                            "/" => 'R',  // Root
-                            "/home" => 'H',  // Home
-                            "/boot" => 'B',  // Boot
-                            "/boot/efi" => 'E',  // EFI
-                            _ => mount.chars().next().unwrap_or('/'),
-                        },
-                        label: Self::get_linux_mount_label(mount),
-                        path: drive_path,
-                    };
-                    drives.push(drive_info);
-                }
-            }
+            println!("开始获取Linux系统挂载点...");
+            // 直接读取 /proc/mounts 获取真实的挂载点
+            if let Ok(mounts_content) = std::fs::read_to_string("/proc/mounts") {
+                println!("成功读取 /proc/mounts 文件");
+                let mut seen_paths = std::collections::HashSet::new();
+                let mut device_counter = 1; // 用于生成唯一盘符
 
-            // 外部设备挂载点 - /media/用户名/ 和 /mnt/
-            if let Ok(username) = std::env::var("USER") {
-                // 检查 /media/用户名/
-                let media_path = format!("/media/{}", username);
-                if let Ok(media_dir) = std::fs::read_dir(&media_path) {
-                    for entry in media_dir.flatten() {
-                        if let Ok(metadata) = entry.metadata() {
-                            if metadata.is_dir() {
-                                let device_path = entry.path();
-                                let device_name = entry.file_name().to_string_lossy().to_string();
-                                let drive_info = DriveInfo {
-                                    letter: 'D',  // External Device
-                                    label: format!("外接设备-{}", device_name),
-                                    path: device_path,
+                for (line_num, line) in mounts_content.lines().enumerate() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let mount_point = parts[1];
+                        println!("行 {}: 挂载点 = {}", line_num + 1, mount_point);
+
+                        // 跳过系统特殊挂载点
+                        if mount_point.starts_with("/proc") ||
+                           mount_point.starts_with("/sys") ||
+                           mount_point.starts_with("/dev") ||
+                           mount_point.starts_with("/run") {
+                            println!("  跳过系统挂载点");
+                            continue;
+                        }
+
+                        // 跳过重复的挂载点
+                        if seen_paths.contains(mount_point) {
+                            println!("  跳过重复挂载点");
+                            continue;
+                        }
+
+                        let drive_path = PathBuf::from(mount_point);
+                        if drive_path.exists() {
+                            // 根据路径生成盘符和标签
+                            let (letter, label) = if mount_point == "/" {
+                                ('/', "根目录")
+                            } else if mount_point == "/home" {
+                                ('~', "用户目录")
+                            } else if mount_point.starts_with("/media") {
+                                let name = drive_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("外部设备");
+                                // 为每个外部设备生成唯一盘符
+                                let unique_letter = if device_counter <= 26 {
+                                    (b'A' + device_counter - 1) as char
+                                } else {
+                                    'D'
                                 };
-                                drives.push(drive_info);
-                            }
-                        }
-                    }
-                }
+                                device_counter += 1;
+                                (unique_letter, name)
+                            } else if mount_point.starts_with("/mnt") {
+                                let name = drive_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("挂载点");
+                                let unique_letter = if device_counter <= 26 {
+                                    (b'A' + device_counter - 1) as char
+                                } else {
+                                    'M'
+                                };
+                                device_counter += 1;
+                                (unique_letter, name)
+                            } else {
+                                let name = drive_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(mount_point);
+                                (name.chars().next().unwrap_or('/'), name)
+                            };
 
-                // 检查 /mnt/
-                if let Ok(mnt_dir) = std::fs::read_dir("/mnt") {
-                    for entry in mnt_dir.flatten() {
-                        if let Ok(metadata) = entry.metadata() {
-                            if metadata.is_dir() {
-                                let file_name = entry.file_name();
-                                if file_name != "." && file_name != ".." {
-                                    let device_path = entry.path();
-                                    let device_name = file_name.to_string_lossy().to_string();
-                                    let drive_info = DriveInfo {
-                                        letter: 'M',  // Mount
-                                        label: format!("挂载-{}", device_name),
-                                        path: device_path,
-                                    };
-                                    drives.push(drive_info);
-                                }
-                            }
+                            println!("  添加盘符: '{}' ({}) -> {}", letter, label, drive_path.display());
+
+                            let drive_info = DriveInfo {
+                                letter,
+                                label: label.to_string(),
+                                path: drive_path,
+                            };
+                            drives.push(drive_info);
+                            seen_paths.insert(mount_point.to_string());
+                        } else {
+                            println!("  路径不存在: {}", drive_path.display());
                         }
+                    } else {
+                        println!("行 {}: 格式错误，跳过", line_num + 1);
                     }
                 }
+            } else {
+                println!("无法读取 /proc/mounts 文件");
             }
+
+            println!("总共识别到 {} 个盘符", drives.len());
         }
 
         drives
@@ -283,17 +336,7 @@ impl DriveBar {
     }
 
     // Linux系统挂载点标签获取
-    #[cfg(target_os = "linux")]
-    fn get_linux_mount_label(mount_point: &str) -> String {
-        match mount_point {
-            "/" => "根目录".to_string(),
-            "/home" => "用户目录".to_string(),
-            "/boot" => "启动分区".to_string(),
-            "/boot/efi" => "EFI分区".to_string(),
-            _ => mount_point.to_string(),
-        }
-    }
-
+    
     #[cfg(not(target_os = "windows"))]
     fn get_drive_volume_label(_drive_path: &PathBuf) -> String {
         // 其他非Windows系统直接返回路径作为标签
@@ -323,6 +366,7 @@ impl DriveBar {
                 let response = ui.add(button);
 
                 if response.clicked() {
+                    println!("点击了盘符: '{}' ({}) -> {}", drive.letter, drive.label, drive.path.display());
                     clicked_drive = Some(drive.letter);
                 }
 
@@ -335,7 +379,9 @@ impl DriveBar {
 
         // 在循环外执行工作区切换
         if let Some(drive_letter) = clicked_drive {
+            println!("开始切换到盘符: '{}'", drive_letter);
             workspace_switched = self.switch_to_workspace(drive_letter, current_path);
+            println!("工作区切换结果: {}, 新路径: {}", workspace_switched, current_path.display());
         }
 
         workspace_switched
@@ -359,22 +405,65 @@ impl DriveBar {
 
     // 切换到指定盘符的工作区
     fn switch_to_workspace(&mut self, drive_letter: char, current_path: &mut PathBuf) -> bool {
+        println!("switch_to_workspace: 切换到盘符 '{}'", drive_letter);
+        println!("  当前路径: {}", current_path.display());
+        println!("  已有工作区: {:?}", self.workspaces.keys().collect::<Vec<_>>());
+
         // 先保存当前工作区状态（由调用者负责）
 
         // 切换到目标工作区
         if let Some(workspace) = self.workspaces.get(&drive_letter) {
+            println!("  找到已存在的工作区: {}", workspace.current_path.display());
             *current_path = workspace.current_path.clone();
             true
         } else {
-            // 创建新的工作区
-            let drive_path = PathBuf::from(format!("{}:/", drive_letter));
-            let workspace = WorkspaceState {
-                current_path: drive_path.clone(),
-                directory_path: drive_path.clone(),
-                nav_history: vec![drive_path.clone()],
-                history_pos: 0,
+            println!("  创建新的工作区...");
+            // 根据操作系统创建新的工作区
+            let (drive_path, workspace) = {
+                // Windows系统方案
+                #[cfg(target_os = "windows")]
+                {
+                    let drive_path = PathBuf::from(format!("{}:/", drive_letter));
+                    let workspace = WorkspaceState {
+                        current_path: drive_path.clone(),
+                        directory_path: drive_path.clone(),
+                        nav_history: vec![drive_path.clone()],
+                        history_pos: 0,
+                    };
+                    (drive_path, workspace)
+                }
+
+                // Linux系统方案
+                #[cfg(target_os = "linux")]
+                {
+                    println!("  Linux系统方案 - 查找盘符 '{}'", drive_letter);
+                    // 查找对应盘符的实际路径
+                    if let Some(drive_info) = self.drives.iter().find(|d| d.letter == drive_letter) {
+                        println!("  找到对应盘符信息: {} -> {}", drive_info.label, drive_info.path.display());
+                        let drive_path = drive_info.path.clone();
+                        let workspace = WorkspaceState {
+                            current_path: drive_path.clone(),
+                            directory_path: drive_path.clone(),
+                            nav_history: vec![drive_path.clone()],
+                            history_pos: 0,
+                        };
+                        (drive_path, workspace)
+                    } else {
+                        println!("  找不到对应盘符，使用根目录");
+                        // 如果找不到对应的盘符，使用根目录作为默认
+                        let default_path = PathBuf::from("/");
+                        let workspace = WorkspaceState {
+                            current_path: default_path.clone(),
+                            directory_path: default_path.clone(),
+                            nav_history: vec![default_path.clone()],
+                            history_pos: 0,
+                        };
+                        (default_path, workspace)
+                    }
+                }
             };
 
+            println!("  新工作区路径: {}", drive_path.display());
             *current_path = drive_path.clone();
             self.workspaces.insert(drive_letter, workspace);
             true
@@ -407,14 +496,38 @@ impl DriveBar {
 
     // 从路径获取盘符
     fn get_drive_letter_from_path(path: &PathBuf) -> Option<char> {
-        if let Some(path_str) = path.to_str() {
-            if path_str.len() >= 2 && path_str.chars().nth(1) == Some(':') {
-                path_str.chars().next()
+        // Windows系统方案
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(path_str) = path.to_str() {
+                if path_str.len() >= 2 && path_str.chars().nth(1) == Some(':') {
+                    path_str.chars().next()
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
+        }
+
+        // Linux系统方案
+        #[cfg(target_os = "linux")]
+        {
+            let path_str = path.to_string_lossy();
+
+            // 根据路径返回对应的盘符
+            if path_str == "/" {
+                Some('/')  // Root
+            } else if path_str == "/home" {
+                Some('~')  // Home
+            } else if path_str.starts_with("/media") {
+                Some('D')  // External Device
+            } else if path_str.starts_with("/mnt") {
+                Some('M')  // Mount
+            } else {
+                // 对于其他路径，尝试从路径中提取盘符
+                path_str.chars().next()
+            }
         }
     }
 
