@@ -164,20 +164,69 @@ impl DriveBar {
             }
         }
 
-        // Linux/Unix系统获取挂载点
-        #[cfg(not(target_os = "windows"))]
+        // Linux系统获取挂载点
+        #[cfg(target_os = "linux")]
         {
-            // 常见的挂载点
-            let common_mounts = vec!["/", "/home"];
-            for mount in common_mounts {
+            // 系统挂载点
+            let system_mounts = vec!["/", "/home", "/boot", "/boot/efi"];
+            for mount in system_mounts {
                 let drive_path = PathBuf::from(mount);
                 if drive_path.exists() {
                     let drive_info = DriveInfo {
-                        letter: mount.chars().next().unwrap_or('/'),
-                        label: mount.to_string(),
+                        letter: match mount {
+                            "/" => 'R',  // Root
+                            "/home" => 'H',  // Home
+                            "/boot" => 'B',  // Boot
+                            "/boot/efi" => 'E',  // EFI
+                            _ => mount.chars().next().unwrap_or('/'),
+                        },
+                        label: Self::get_linux_mount_label(mount),
                         path: drive_path,
                     };
                     drives.push(drive_info);
+                }
+            }
+
+            // 外部设备挂载点 - /media/用户名/ 和 /mnt/
+            if let Ok(username) = std::env::var("USER") {
+                // 检查 /media/用户名/
+                let media_path = format!("/media/{}", username);
+                if let Ok(media_dir) = std::fs::read_dir(&media_path) {
+                    for entry in media_dir.flatten() {
+                        if let Ok(metadata) = entry.metadata() {
+                            if metadata.is_dir() {
+                                let device_path = entry.path();
+                                let device_name = entry.file_name().to_string_lossy().to_string();
+                                let drive_info = DriveInfo {
+                                    letter: 'D',  // External Device
+                                    label: format!("外接设备-{}", device_name),
+                                    path: device_path,
+                                };
+                                drives.push(drive_info);
+                            }
+                        }
+                    }
+                }
+
+                // 检查 /mnt/
+                if let Ok(mnt_dir) = std::fs::read_dir("/mnt") {
+                    for entry in mnt_dir.flatten() {
+                        if let Ok(metadata) = entry.metadata() {
+                            if metadata.is_dir() {
+                                let file_name = entry.file_name();
+                                if file_name != "." && file_name != ".." {
+                                    let device_path = entry.path();
+                                    let device_name = file_name.to_string_lossy().to_string();
+                                    let drive_info = DriveInfo {
+                                        letter: 'M',  // Mount
+                                        label: format!("挂载-{}", device_name),
+                                        path: device_path,
+                                    };
+                                    drives.push(drive_info);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -233,9 +282,21 @@ impl DriveBar {
         }
     }
 
+    // Linux系统挂载点标签获取
+    #[cfg(target_os = "linux")]
+    fn get_linux_mount_label(mount_point: &str) -> String {
+        match mount_point {
+            "/" => "根目录".to_string(),
+            "/home" => "用户目录".to_string(),
+            "/boot" => "启动分区".to_string(),
+            "/boot/efi" => "EFI分区".to_string(),
+            _ => mount_point.to_string(),
+        }
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn get_drive_volume_label(_drive_path: &PathBuf) -> String {
-        // Linux/Unix系统直接返回路径作为标签
+        // 其他非Windows系统直接返回路径作为标签
         _drive_path.to_string_lossy().into_owned()
     }
 
