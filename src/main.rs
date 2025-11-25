@@ -348,17 +348,18 @@ impl eframe::App for FileExplorerApp {
 
                 let workspace_switched = self.drive_bar.show(ui, &mut self.current_path);
                 if workspace_switched {
-                    // 工作区切换，恢复新工作区的状态
-                    if let Some(workspace) = self.drive_bar.get_current_workspace(&self.current_path) {
-                        self.current_path = workspace.current_path.clone();
-                        self.directory_current_path = workspace.directory_path.clone();
-                        self.nav_history = workspace.nav_history.clone();
-                        self.history_pos = workspace.history_pos;
+                    println!("主程序: 工作区切换成功，当前路径: {}", self.current_path.display());
 
-                        // 刷新两个列表
-                        self.refresh_file_list();
-                        self.refresh_directory_list();
-                    }
+                    // 重置导航历史和位置
+                    self.nav_history = vec![self.current_path.clone()];
+                    self.history_pos = 0;
+                    self.directory_current_path = self.current_path.clone();
+
+                    // 刷新两个列表
+                    self.refresh_file_list();
+                    self.refresh_directory_list();
+
+                    println!("主程序: 文件列表已刷新");
                 }
 
                 ui.separator();
