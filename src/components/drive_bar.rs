@@ -92,7 +92,7 @@ impl DriveBar {
         drive_bar.load_workspaces_from_cache();
 
         // 为当前路径初始化工作区
-        if let Some(drive_letter) = Self::get_drive_letter_from_path(initial_path) {
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(&drive_bar.drives, initial_path) {
             drive_bar.ensure_workspace_exists(drive_letter, initial_path);
         }
 
@@ -390,7 +390,7 @@ impl DriveBar {
     // 保存当前工作区状态
     pub fn save_workspace_state(&mut self, current_path: &PathBuf, directory_path: &PathBuf,
                                nav_history: &[PathBuf], history_pos: usize) {
-        if let Some(drive_letter) = Self::get_drive_letter_from_path(current_path) {
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(&self.drives, current_path) {
             let workspace = WorkspaceState {
                 current_path: current_path.clone(),
                 directory_path: directory_path.clone(),
@@ -409,11 +409,16 @@ impl DriveBar {
         println!("  当前路径: {}", current_path.display());
         println!("  已有工作区: {:?}", self.workspaces.keys().collect::<Vec<_>>());
 
+        // 打印所有工作区的详细信息
+        for (letter, workspace) in &self.workspaces {
+            println!("  工作区 '{}': {}", letter, workspace.current_path.display());
+        }
+
         // 先保存当前工作区状态（由调用者负责）
 
         // 切换到目标工作区
         if let Some(workspace) = self.workspaces.get(&drive_letter) {
-            println!("  找到已存在的工作区: {}", workspace.current_path.display());
+            println!("  找到已存在的工作区: {} (期望: 根目录)", workspace.current_path.display());
             *current_path = workspace.current_path.clone();
             true
         } else {
@@ -472,7 +477,7 @@ impl DriveBar {
 
     // 获取当前工作区状态
     pub fn get_current_workspace(&self, current_path: &PathBuf) -> Option<&WorkspaceState> {
-        if let Some(drive_letter) = Self::get_drive_letter_from_path(current_path) {
+        if let Some(drive_letter) = Self::get_drive_letter_from_path(&self.drives, current_path) {
             self.workspaces.get(&drive_letter)
         } else {
             None
@@ -495,7 +500,7 @@ impl DriveBar {
     }
 
     // 从路径获取盘符
-    fn get_drive_letter_from_path(path: &PathBuf) -> Option<char> {
+    fn get_drive_letter_from_path(drives: &[DriveInfo], path: &PathBuf) -> Option<char> {
         // Windows系统方案
         #[cfg(target_os = "windows")]
         {
@@ -520,13 +525,32 @@ impl DriveBar {
                 Some('/')  // Root
             } else if path_str == "/home" {
                 Some('~')  // Home
+            } else if path_str == "/boot/efi" {
+                Some('e')  // EFI
+            } else if path_str.starts_with("/boot") {
+                Some('b')  // Boot
             } else if path_str.starts_with("/media") {
-                Some('D')  // External Device
+                // 从设备信息中查找正确的盘符
+                for drive in drives {
+                    if drive.path == *path {
+                        return Some(drive.letter);
+                    }
+                }
+                Some('D')  // External Device 默认
             } else if path_str.starts_with("/mnt") {
                 Some('M')  // Mount
             } else {
-                // 对于其他路径，尝试从路径中提取盘符
-                path_str.chars().next()
+                // 对于其他路径，使用更严格的映射
+                if path_str.starts_with("/home/") {
+                    Some('~')  // 用户子目录
+                } else if path_str == "/home" {
+                    Some('~')  // Home根目录
+                } else if path_str.starts_with("/boot/") {
+                    Some('b')  // Boot子目录
+                } else {
+                    // 其他情况不映射，返回None
+                    None
+                }
             }
         }
     }
