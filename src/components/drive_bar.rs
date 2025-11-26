@@ -73,15 +73,25 @@ impl DriveBar {
     }
 
     fn find_drive_root(&self, path: &PathBuf) -> PathBuf {
+        println!("盘符栏: 查找路径 {} 的盘符根目录", path.display());
         for drive in &self.drives {
             if path.starts_with(&drive.path) {
+                println!("盘符栏: 找到匹配盘符 {}", drive.path.display());
                 return drive.path.clone();
             }
         }
+        println!("盘符栏: 没有找到匹配盘符，使用根目录");
         PathBuf::from("/")
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
+        // 调试：显示当前保存的路径状态
+        if self.saved_paths.len() > 0 {
+            println!("盘符栏: 当前保存的工作区路径:");
+            for (drive_root, saved_path) in &self.saved_paths {
+                println!("  {} -> {}", drive_root.display(), saved_path.display());
+            }
+        }
         let mut workspace_switched = false;
 
         ui.horizontal(|ui| {
@@ -105,15 +115,31 @@ impl DriveBar {
                             egui::Color32::TRANSPARENT
                         })
                 ).clicked() {
-                    // 保存当前路径到当前盘符
-                    let current_drive_root = self.find_drive_root(current_path);
-                    self.saved_paths.insert(current_drive_root, current_path.clone());
+                    println!("盘符栏: 点击了盘符 {}", drive.path.display());
+                    println!("盘符栏: 切换前的当前路径 {}", current_path.display());
 
-                    // 切换到新盘符，恢复保存的路径或使用盘符根目录
-                    *current_path = self.saved_paths.get(&drive.path)
-                        .cloned()
-                        .unwrap_or_else(|| drive.path.clone());
+                    // 简单直接：保存当前绝对路径到对应的盘符
+                    // 找到当前路径属于哪个盘符
+                    let mut current_drive = PathBuf::from("/");
+                    for d in &self.drives {
+                        if current_path.starts_with(&d.path) && d.path.as_os_str().len() > current_drive.as_os_str().len() {
+                            current_drive = d.path.clone();
+                        }
+                    }
 
+                    println!("盘符栏: 保存路径 {} 到盘符 {}", current_path.display(), current_drive.display());
+                    self.saved_paths.insert(current_drive.clone(), current_path.clone());
+
+                    // 切换到新盘符，恢复保存的路径
+                    if let Some(saved_path) = self.saved_paths.get(&drive.path) {
+                        println!("盘符栏: 恢复保存的路径 {}", saved_path.display());
+                        *current_path = saved_path.clone();
+                    } else {
+                        println!("盘符栏: 没有保存的路径，使用盘符根目录 {}", drive.path.display());
+                        *current_path = drive.path.clone();
+                    }
+
+                    println!("盘符栏: 切换后的路径 {}", current_path.display());
                     workspace_switched = true;
                 }
             }
