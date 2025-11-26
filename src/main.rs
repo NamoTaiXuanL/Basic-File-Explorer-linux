@@ -180,9 +180,6 @@ impl FileExplorerApp {
     fn refresh_file_list(&mut self) {
         // 只刷新内容框
         self.file_list.refresh(self.current_path.clone(), self.show_hidden);
-
-        // 保存工作区状态
-        self.save_current_workspace_state();
     }
 
     fn refresh_directory_list(&mut self) {
@@ -338,14 +335,7 @@ impl eframe::App for FileExplorerApp {
 
                 ui.separator();
 
-                // 盘符栏 - 先保存当前工作区状态
-                self.drive_bar.save_workspace_state(
-                    &self.current_path,
-                    &self.directory_current_path,
-                    &self.nav_history,
-                    self.history_pos
-                );
-
+                // 盘符栏 - 切换工作区
                 let workspace_switched = self.drive_bar.show(ui, &mut self.current_path);
                 if workspace_switched {
                     println!("主程序: 工作区切换成功，当前路径: {}", self.current_path.display());

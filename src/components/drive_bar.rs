@@ -1,6 +1,7 @@
 use eframe::egui;
 use std::path::PathBuf;
 use std::fs;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Drive {
@@ -11,14 +12,14 @@ pub struct Drive {
 
 pub struct DriveBar {
     drives: Vec<Drive>,
-    current_workspace: PathBuf,
+    saved_paths: HashMap<PathBuf, PathBuf>,  // 盘符路径 -> 保存的工作路径
 }
 
 impl DriveBar {
     pub fn new(current_path: &PathBuf) -> Self {
         let mut drive_bar = Self {
             drives: Vec::new(),
-            current_workspace: current_path.clone(),
+            saved_paths: HashMap::new(),
         };
         drive_bar.refresh_drives();
         drive_bar
@@ -71,6 +72,15 @@ impl DriveBar {
         }
     }
 
+    fn find_drive_root(&self, path: &PathBuf) -> PathBuf {
+        for drive in &self.drives {
+            if path.starts_with(&drive.path) {
+                return drive.path.clone();
+            }
+        }
+        PathBuf::from("/")
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf) -> bool {
         let mut workspace_switched = false;
 
@@ -95,7 +105,15 @@ impl DriveBar {
                             egui::Color32::TRANSPARENT
                         })
                 ).clicked() {
-                    *current_path = drive.path.clone();
+                    // 保存当前路径到当前盘符
+                    let current_drive_root = self.find_drive_root(current_path);
+                    self.saved_paths.insert(current_drive_root, current_path.clone());
+
+                    // 切换到新盘符，恢复保存的路径或使用盘符根目录
+                    *current_path = self.saved_paths.get(&drive.path)
+                        .cloned()
+                        .unwrap_or_else(|| drive.path.clone());
+
                     workspace_switched = true;
                 }
             }
@@ -111,6 +129,7 @@ impl DriveBar {
         _nav_history: &[PathBuf],
         _history_pos: usize,
     ) {
-        self.current_workspace = current_path.clone();
+        let drive_root = self.find_drive_root(current_path);
+        self.saved_paths.insert(drive_root, current_path.clone());
     }
 }
