@@ -17,6 +17,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 优先在已实现的功能上修改
 避免修改已实现的功能的代码  只修改必要的代码
 
+## 文件编码
+全部使用UTF-8 编码
+
 
 
 ## Git 使用规范
