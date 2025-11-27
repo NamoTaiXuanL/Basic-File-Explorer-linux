@@ -12,7 +12,7 @@ use sysinfo::System;
 
 // 缓存的纹理结构
 #[derive(Clone)]
-struct CachedTexture {
+pub struct CachedTexture {
     texture: egui::TextureHandle,
     size: (u32, u32),
 }
@@ -62,7 +62,7 @@ pub struct Preview {
     // 异步加载
     loading_result: Option<Arc<Mutex<Option<LoadingResult>>>>,
     // 多线程预加载 - 直接包含，不再使用Option
-    preloader: ThumbnailPreloader,
+    pub preloader: ThumbnailPreloader,
     // 异步文件夹预览
     folder_preview_sender: Option<Sender<(String, Vec<PathBuf>)>>,
     folder_preview_receiver: Option<Receiver<(String, Vec<PathBuf>)>>,
@@ -89,11 +89,11 @@ struct LoadingResult {
     folder_content: Option<String>,
 }
 
-struct CachedImage {
-    texture: egui::TextureHandle,
-    size: (u32, u32),
-    file_size: u64,
-    last_modified: std::time::SystemTime,
+pub struct CachedImage {
+    pub texture: egui::TextureHandle,
+    pub size: (u32, u32),
+    pub file_size: u64,
+    pub last_modified: std::time::SystemTime,
 }
 
 #[derive(Default)]
@@ -104,10 +104,10 @@ struct FileInfo {
 }
 
 // 多线程缩略图预加载器
-struct ThumbnailPreloader {
-    sender: Sender<PathBuf>,
-    cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
-    texture_cache: Arc<Mutex<HashMap<String, CachedTexture>>>,
+pub struct ThumbnailPreloader {
+    pub sender: Sender<PathBuf>,
+    pub cache: Arc<Mutex<HashMap<String, (image::RgbaImage, (u32, u32))>>>,
+    pub texture_cache: Arc<Mutex<HashMap<String, CachedTexture>>>,
     threads: Vec<thread::JoinHandle<()>>,
     stop_signal: Arc<atomic::AtomicBool>,
     thread_count: usize,
@@ -205,7 +205,7 @@ impl ThumbnailPreloader {
 
     // 文件大小检查现在在工作线程中进行，避免阻塞UI
 
-    fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
+    pub fn get_cached_thumbnail(&self, path: &Path, ctx: &egui::Context) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = path.to_string_lossy().to_string();
 
         // 检查纹理缓存
@@ -247,7 +247,7 @@ impl ThumbnailPreloader {
     }
 
     // 检查图片是否已缓存
-    fn is_cached(&self, path: &Path) -> bool {
+    pub fn is_cached(&self, path: &Path) -> bool {
         let cache_key = path.to_string_lossy().to_string();
         
         // 检查纹理缓存
@@ -977,7 +977,7 @@ impl Preview {
         }
     }
 
-    fn get_cached_image(&self, path: &Path) -> Option<(egui::TextureHandle, (u32, u32))> {
+    pub fn get_cached_image(&self, path: &Path) -> Option<(egui::TextureHandle, (u32, u32))> {
         let cache_key = self.get_cache_key(path);
         if let Some(cached) = self.texture_cache.get(&cache_key) {
             // 简化缓存有效性检查，只在文件大小变化时才重新验证

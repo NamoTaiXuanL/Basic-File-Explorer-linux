@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use crate::utils;
 use super::mouse_strategy::MouseDoubleClickStrategy;
+use super::thumbnail_view::ThumbnailView;
 
 #[derive(Clone)]
 struct FileItem {
@@ -23,13 +24,15 @@ pub struct FileList {
     col_size_ratio: f32,
     mouse_strategy: MouseDoubleClickStrategy,
     icon_manager: super::icon_manager::IconManager,
+    thumbnail_view: ThumbnailView, // 缩略图视图模块
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewMode {
-    Details,    // 详细信息（列表视图）
-    LargeIcons, // 大图标
-    SmallIcons, // 小图标
+    Details,        // 详细信息（列表视图）
+    LargeIcons,     // 大图标
+    SmallIcons,     // 小图标
+    ThumbnailIcons, // 缩略图模式（大图标增强）
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +54,7 @@ impl FileList {
             col_size_ratio: 0.15,
             mouse_strategy: MouseDoubleClickStrategy::new(),
             icon_manager: super::icon_manager::IconManager::new(),
+            thumbnail_view: ThumbnailView::new(),
         }
     }
 
@@ -147,14 +151,20 @@ impl FileList {
         });
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, view_mode: ViewMode) -> bool {
+    pub fn show(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, view_mode: ViewMode, preview: Option<&super::preview::Preview>) -> bool {
         // 确保纹理已加载
         self.icon_manager.ensure_textures(ui.ctx());
 
+        // 设置预览组件引用以支持缩略图
+        if let Some(p) = preview {
+            self.thumbnail_view.set_preview_ref(p);
+        }
+
         match view_mode {
             ViewMode::Details => self.show_details_view(ui, current_path, selected_file),
-            ViewMode::LargeIcons => self.show_icons_view(ui, current_path, selected_file, true),
-            ViewMode::SmallIcons => self.show_icons_view(ui, current_path, selected_file, false),
+            ViewMode::LargeIcons => self.show_icons_view(ui, current_path, selected_file, true, false),
+            ViewMode::SmallIcons => self.show_icons_view(ui, current_path, selected_file, false, false),
+            ViewMode::ThumbnailIcons => self.show_icons_view(ui, current_path, selected_file, true, true),
         }
     }
 
@@ -338,7 +348,7 @@ impl FileList {
         should_navigate
     }
 
-    fn show_icons_view(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, is_large: bool) -> bool {
+    fn show_icons_view(&mut self, ui: &mut egui::Ui, current_path: &mut PathBuf, selected_file: &mut Option<PathBuf>, is_large: bool, use_thumbnails: bool) -> bool {
         let mut should_navigate = false;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -491,11 +501,25 @@ impl FileList {
                             self.draw_default_icon_scaled(painter, center_x, icon_y, icon_size);
                         }
                     } else {
-                        // 绘制其他文件图标（使用emoji），与文件夹图标对齐
-                        let icon_text = utils::get_file_icon(&file.path);
-                        let icon_y = rect.top() + (item_size * 0.15) + if is_large { 32.0 * 0.8 } else { 16.0 };
-                        let icon_pos = egui::pos2(center_x, icon_y);
-                        painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
+                        // 绘制其他文件图标（使用emoji）或缩略图，与文件夹图标对齐
+                        let icon_y = rect.top() + (item_size * 0.15);
+
+                        if use_thumbnails && is_large {
+                            // 缩略图模式：优先显示缩略图
+                            let thumbnail_size = if is_large { 50.0 * 0.8 } else { 25.0 };
+                            if !self.thumbnail_view.draw_thumbnail_if_available(ui, painter, center_x, icon_y + thumbnail_size * 0.5, thumbnail_size, &file.path) {
+                                // 缩略图不可用，显示默认图标
+                                let icon_text = utils::get_file_icon(&file.path);
+                                let icon_pos = egui::pos2(center_x, icon_y + thumbnail_size * 0.5);
+                                painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
+                            }
+                        } else {
+                            // 普通模式：显示emoji图标
+                            let icon_text = utils::get_file_icon(&file.path);
+                            let icon_size = if is_large { 32.0 * 0.8 } else { 16.0 };
+                            let icon_pos = egui::pos2(center_x, icon_y + icon_size * 0.5);
+                            painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
+                        }
                     }
 
                     // 绘制文件名，确保与图标的中轴线对齐

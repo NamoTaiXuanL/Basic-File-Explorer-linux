@@ -62,6 +62,9 @@ pub fn show_toolbar(ui: &mut egui::Ui, current_path: &mut PathBuf, view_mode: &m
         if ui.add(egui::Button::new("小图标").small()).clicked() {
             *view_mode = ViewMode::SmallIcons;
         }
+        if ui.add(egui::Button::new("缩略图").small()).clicked() {
+            *view_mode = ViewMode::ThumbnailIcons;
+        }
         if ui.add(egui::Button::new("详情").small()).clicked() {
             *view_mode = ViewMode::Details;
         }

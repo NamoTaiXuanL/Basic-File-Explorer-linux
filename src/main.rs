@@ -547,7 +547,7 @@ impl eframe::App for FileExplorerApp {
 
                             // 独立的滚动区域
                             egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
-                                let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file, self.view_mode);
+                                let should_navigate = self.file_list.show(ui, &mut self.current_path, &mut self.selected_file, self.view_mode, Some(&self.preview));
                                 if should_navigate {
                                     // 内容框点击文件夹时：只更新内容框，不刷新目录框
                                     self.current_path = self.selected_file.as_ref().unwrap_or(&self.current_path).clone();
