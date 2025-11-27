@@ -853,9 +853,7 @@ impl Preview {
                         }
                     });
                 } else if !self.preview_content.is_empty() {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.monospace(&self.preview_content);
-                    });
+                    ui.monospace(&self.preview_content);
                     
                     // 显示图片流预览（如果有图片）
                     if !self.image_stream_paths.is_empty() {
