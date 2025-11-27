@@ -409,7 +409,16 @@ impl FileList {
                     let color = ui.visuals().text_color();
 
                     // 绘制图标
-                    if file.is_dir {
+                    if use_thumbnails && is_large && self.thumbnail_view.is_image_file(&file.path) {
+                        // 缩略图模式且为图片文件：优先显示缩略图
+                        let thumbnail_size = 50.0 * 0.8; // 40px
+                        let icon_y = rect.top() + (item_size * 0.15) + (thumbnail_size * 0.5);
+                        if !self.thumbnail_view.draw_thumbnail_if_available(ui, painter, center_x, icon_y, thumbnail_size, &file.path) {
+                            // 缩略图不可用，显示默认图标
+                            let icon_text = utils::get_file_icon(&file.path);
+                            painter.text(egui::pos2(center_x, icon_y), egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
+                        }
+                    } else if file.is_dir {
                         // 使用自定义文件夹图标，确保图标和文字的中轴线对齐
                         if is_large {
                             // 大图标模式：使用80%大小的64px图标 (51.2px)
@@ -501,25 +510,11 @@ impl FileList {
                             self.draw_default_icon_scaled(painter, center_x, icon_y, icon_size);
                         }
                     } else {
-                        // 绘制其他文件图标（使用emoji）或缩略图，与文件夹图标对齐
-                        let icon_y = rect.top() + (item_size * 0.15);
-
-                        if use_thumbnails && is_large {
-                            // 缩略图模式：优先显示缩略图
-                            let thumbnail_size = if is_large { 50.0 * 0.8 } else { 25.0 };
-                            if !self.thumbnail_view.draw_thumbnail_if_available(ui, painter, center_x, icon_y + thumbnail_size * 0.5, thumbnail_size, &file.path) {
-                                // 缩略图不可用，显示默认图标
-                                let icon_text = utils::get_file_icon(&file.path);
-                                let icon_pos = egui::pos2(center_x, icon_y + thumbnail_size * 0.5);
-                                painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
-                            }
-                        } else {
-                            // 普通模式：显示emoji图标
-                            let icon_text = utils::get_file_icon(&file.path);
-                            let icon_size = if is_large { 32.0 * 0.8 } else { 16.0 };
-                            let icon_pos = egui::pos2(center_x, icon_y + icon_size * 0.5);
-                            painter.text(icon_pos, egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
-                        }
+                        // 其他文件类型：显示emoji图标
+                        let icon_text = utils::get_file_icon(&file.path);
+                        let icon_size = if is_large { 32.0 * 0.8 } else { 16.0 };
+                        let icon_y = rect.top() + (item_size * 0.15) + (icon_size * 0.5);
+                        painter.text(egui::pos2(center_x, icon_y), egui::Align2::CENTER_CENTER, icon_text, font_id.clone(), color);
                     }
 
                     // 绘制文件名，确保与图标的中轴线对齐
