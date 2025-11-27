@@ -78,7 +78,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.folder_icon_32 = Some(egui_image);
             }
         }
@@ -88,7 +88,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.folder_icon_64 = Some(egui_image);
             }
         }
@@ -98,7 +98,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.exe_icon_25 = Some(egui_image);
             }
         }
@@ -108,7 +108,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.exe_icon_50 = Some(egui_image);
             }
         }
@@ -118,7 +118,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.dll_icon_25 = Some(egui_image);
             }
         }
@@ -128,7 +128,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.dll_icon_50 = Some(egui_image);
             }
         }
@@ -138,7 +138,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.txt_icon_25 = Some(egui_image);
             }
         }
@@ -148,7 +148,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.txt_icon_50 = Some(egui_image);
             }
         }
@@ -158,7 +158,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.code_icon_25 = Some(egui_image);
             }
         }
@@ -168,7 +168,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.code_icon_50 = Some(egui_image);
             }
         }
@@ -178,7 +178,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.unidentified_icon_25 = Some(egui_image);
             }
         }
@@ -188,7 +188,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.unidentified_icon_50 = Some(egui_image);
             }
         }
@@ -198,7 +198,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.default_icon_25 = Some(egui_image);
             }
         }
@@ -208,7 +208,7 @@ impl IconManager {
             if let Ok(image) = image::load_from_memory(&image_data) {
                 let rgba_image = image.to_rgba8();
                 let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-                let egui_image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba_image.into_raw());
+                let egui_image = egui::ColorImage::from_rgba_premultiplied(size, &rgba_image);
                 self.default_icon_50 = Some(egui_image);
             }
         }
